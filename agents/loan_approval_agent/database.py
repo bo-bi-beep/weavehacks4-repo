@@ -106,6 +106,30 @@ def get_user(username: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_all_usernames() -> list[str]:
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT username FROM users ORDER BY username").fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+
+def get_latest_decision(username: str) -> dict | None:
+    """Return the most recent loan decision for a user, or None if none exists."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.execute(
+        """SELECT approved, score, requested_amount, timestamp
+           FROM loan_decisions
+           WHERE username = ?
+           ORDER BY timestamp DESC
+           LIMIT 1""",
+        (username,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def record_loan_decision(
     username: str,
     requested_amount: float,

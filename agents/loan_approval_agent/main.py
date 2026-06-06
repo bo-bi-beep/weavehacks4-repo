@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from agent import chat, create_session, sessions
 from config import HOST, PORT
-from database import init_db
+from database import get_all_usernames, get_latest_decision, get_user, init_db
 
 
 @asynccontextmanager
@@ -44,6 +44,29 @@ class SessionState(BaseModel):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@app.get("/users")
+def list_users():
+    """Return all usernames in the database."""
+    return {"usernames": get_all_usernames()}
+
+
+@app.get("/users/{username}/approval-status")
+def user_approval_status(username: str):
+    """Return the most recent approval decision for a user, or N/A if none exists."""
+    if get_user(username) is None:
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
+    decision = get_latest_decision(username)
+    if decision is None:
+        return {"username": username, "status": "N/A"}
+    return {
+        "username": username,
+        "status": "approved" if decision["approved"] else "denied",
+        "score": decision["score"],
+        "requested_amount": decision["requested_amount"],
+        "timestamp": decision["timestamp"],
+    }
+
 
 @app.post("/sessions", response_model=NewSessionResponse, status_code=201)
 def new_session():
