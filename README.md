@@ -7,6 +7,7 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - OpenAI + Weave example path in `src/index.ts`
 - Weave smoke test in `src/smoke.ts`
 - Python `SubAgentManager` for parallel FinTech loan-agent red teaming in `agents/sub_agent_manager.py`
+- Python `MainAgentOptimizer` for Weave-history-aware next attack direction generation in `agents/main_agent/main_agent_module/`
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
 - Agent setup docs in `docs/agent-setup.md`
@@ -25,6 +26,20 @@ Python red-team demo:
 ```bash
 python3.10 -m pip install -r requirements.txt
 python3.10 -m agents.sub_agent_manager
+```
+
+Export selected Weave trace fields:
+```bash
+python3.10 -m agents.main_agent.main_agent_module.trace_exporter \
+  --project "$WANDB_ENTITY/$WANDB_PROJECT" \
+  --output data/weave_traces/latest_trace_calls.jsonl \
+  --limit 100
+```
+
+Custom field selection:
+```bash
+python3.10 -m agents.main_agent.main_agent_module.trace_exporter \
+  --fields "id,op_name,trace_id,inputs.attack_direction,output.is_breached,summary.weave.status"
 ```
 
 ## Env vars
