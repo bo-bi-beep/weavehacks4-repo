@@ -20,12 +20,40 @@ Set these locally before launching your agent:
 ```bash
 export WANDB_API_KEY=your-wandb-api-key
 export WANDB_ENTITY=your-wandb-entity
-export WANDB_PROJECT=weavehacks4-your-idea
+export WANDB_PROJECT=weavehacks4-attack-kb
 export OPENAI_API_KEY=your-openai-api-key
 export OPENAI_MODEL=gpt-5.4-mini
-# Blaxel sandbox (compute backend for agents/main_agent)
+
+# Blaxel sandbox (compute backend for agents/main_agent and agents/sub_agents)
 export BL_API_KEY=your-blaxel-api-key
 export BL_WORKSPACE=your-blaxel-workspace
+
+# Attack KB fleet: OpenAI powers model calls; W&B powers Weave traces.
+export ATTACK_KB_LLM_PROVIDER=openai
+export ATTACK_KB_SOURCE_DISCOVERY_MODEL=gpt-4.1-mini
+export ATTACK_KB_SOURCE_RETRIEVAL_MODEL=gpt-4.1-mini
+export ATTACK_KB_CREDIBILITY_TRIAGE_MODEL=gpt-4.1
+export ATTACK_KB_CURATOR_MODEL=gpt-4.1
+export ATTACK_KB_RECOMMENDER_MODEL=gpt-4.1
+```
+
+## Attack KB runtime
+
+The Attack KB subagent fleet uses both keys:
+
+- `OPENAI_API_KEY` for direct OpenAI API model calls
+- `WANDB_API_KEY` for W&B Weave tracing/logging
+
+Each subagent role can use a different model via its own env var. Check local config without making a model call:
+
+```bash
+npm run attack-kb:config
+```
+
+Run one optional traced smoke call, which consumes OpenAI API usage and logs to Weave:
+
+```bash
+npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 ```
 
 ## Claude Code
@@ -148,6 +176,6 @@ used as a per-agent name prefix. See `agents/sub_agents/README.md` for the full
 API and curl examples.
 
 ## Notes
-- No secrets are committed; all MCP files expect your local `WANDB_API_KEY`.
+- No secrets are committed; all MCP files expect your local `WANDB_API_KEY`, and Attack KB model calls expect your local `OPENAI_API_KEY`.
 - If an agent does not pick up a new config file, restart it from the repo root.
 - For broad W&B help beyond this repo's custom skill, the official package is `wandb/skills`.

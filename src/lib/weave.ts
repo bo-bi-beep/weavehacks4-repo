@@ -2,7 +2,7 @@ import { setTraceProcessors } from "@openai/agents";
 import * as weave from "weave";
 
 export function getWeaveProjectName(): string {
-  const project = process.env.WANDB_PROJECT?.trim() || "weavehacks4-your-idea";
+  const project = process.env.WANDB_PROJECT?.trim() || "weavehacks4-attack-kb";
   const entity = process.env.WANDB_ENTITY?.trim();
   return entity ? `${entity}/${project}` : project;
 }

@@ -8,6 +8,8 @@
     "main:agent": "tsx agents/main_agent/index.ts",
     "sub:agents": "tsx agents/sub_agents/server.ts",
     "weave:smoke": "tsx src/smoke.ts",
+    "attack-kb:config": "tsx attack-kb/src/print-config.ts",
+    "attack-kb:smoke": "tsx attack-kb/src/smoke.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json"
   },
