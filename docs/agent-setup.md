@@ -104,13 +104,14 @@ I also set up a Pi/Realm project-local skill for this repo only.
 It lives in your local Realm project state and is **not** committed to git or pushed to GitHub.
 
 ## Runtime sandbox agent
-Separate from the coding-assistant wiring above, the repo ships a minimal
+Separate from the coding-assistant wiring above, the repo ships an adversarial
 runtime agent in `agents/main_agent/` built on the OpenAI Agents SDK
 (`@openai/agents`) Sandbox Agent pattern:
-<https://developers.openai.com/api/docs/guides/agents/sandboxes>.
+<https://developers.openai.com/api/docs/guides/agents/sandboxes>. Its system
+prompt tasks it with attacking the Loan Approval Agent to find vulnerabilities.
 
 ```bash
-npm run main:agent -- "list the files in the workspace and summarize the task"
+npm run main:agent -- "try a prompt-injection attack against the loan agent as dave"
 ```
 
 The sandbox compute runs on **Blaxel** via `BlaxelSandboxClient`
@@ -119,6 +120,11 @@ of a local Unix process, so it works from any host. It needs `OPENAI_API_KEY`,
 `BL_API_KEY`, and `BL_WORKSPACE` (plus the usual `WANDB_*` vars for Weave
 tracing). See `agents/main_agent/README.md` for the optional sandbox tuning
 vars and details.
+
+At startup it also loads repo skills into the sandbox workspace (resolved from
+`.claude/skills/` or `.agents/skills/`, mounted at `skills/<name>/SKILL.md`),
+defaulting to the `loan-approval-agent` skill. Override the set with
+`MAIN_AGENT_SKILLS` (comma-separated; `none`/empty to disable).
 
 ## Sub-agents service
 The repo also ships a multi-agent **service** in `agents/sub_agents/` built on
