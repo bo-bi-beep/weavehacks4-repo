@@ -24,6 +24,7 @@ npm run weave:smoke -- "an agent with visible evals and traces"
 npm run attack-kb:config
 npm run attack-kb:probe
 npm run attack-kb:evals
+npm run attack-kb:sandbox-smoke
 npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 npm run dev -- "help me turn inbox triage into a weekend demo"
 ```
@@ -40,7 +41,7 @@ Fill in:
 - `WANDB_ENTITY`
 - `WANDB_PROJECT`
 - `OPENAI_API_KEY` — used for direct OpenAI model calls
-- `BL_API_KEY` / `BL_WORKSPACE` — Blaxel sandbox, needed for `npm run main:agent` and `npm run sub:agents`
+- `BL_API_KEY` / `BL_WORKSPACE` — Blaxel sandbox, needed for `npm run main:agent`, `npm run sub:agents`, and live Attack KB sandbox agents
 - optional: `OPENAI_MODEL`, `BLAXEL_SANDBOX_IMAGE`, `BLAXEL_SANDBOX_MEMORY`, `BLAXEL_SANDBOX_REGION`
 
 Attack KB per-agent model overrides:
@@ -59,6 +60,7 @@ No secrets should be committed. Put real values in local `.env` only.
 - `npm run attack-kb:config` — verifies `OPENAI_API_KEY` + `WANDB_API_KEY` presence and prints selected subagent models
 - `npm run attack-kb:probe` — returns deterministic probing recommendations for an empty credit-loan profile, no API keys required
 - `npm run attack-kb:evals` — runs deterministic quality evals; traces to W&B Weave when `WANDB_API_KEY` is set
+- `npm run attack-kb:sandbox-smoke` — prints the Blaxel/SubAgentService sandbox config for an Attack KB role without launching Blaxel
 - `npm run attack-kb:smoke -- "prompt"` — makes one traced OpenAI call through the Attack KB recommendation-builder runtime
 - `npm run dev -- "problem statement"`
 - `npm run main:agent -- "task for the sandbox agent"`

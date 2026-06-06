@@ -16,6 +16,7 @@
     "attack-kb:evals": "tsx attack-kb/evals/run.ts",
     "attack-kb:demo": "tsx attack-kb/src/demo/server.ts",
     "attack-kb:demo-smoke": "tsx attack-kb/src/demo/smoke.ts",
+    "attack-kb:sandbox-smoke": "tsx attack-kb/src/sandbox-smoke.ts",
     "attack-kb:smoke": "tsx attack-kb/src/smoke.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json"

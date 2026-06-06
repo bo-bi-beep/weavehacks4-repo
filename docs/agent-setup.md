@@ -24,7 +24,8 @@ export WANDB_PROJECT=weavehacks4-attack-kb
 export OPENAI_API_KEY=your-openai-api-key
 export OPENAI_MODEL=gpt-5.4-mini
 
-# Blaxel sandbox (compute backend for agents/main_agent and agents/sub_agents)
+# Blaxel sandbox (compute backend for agents/main_agent, agents/sub_agents,
+# and live Attack KB sandbox agents)
 export BL_API_KEY=your-blaxel-api-key
 export BL_WORKSPACE=your-blaxel-workspace
 
@@ -48,6 +49,12 @@ Each subagent role can use a different model via its own env var. Check local co
 
 ```bash
 npm run attack-kb:config
+```
+
+Check the Attack KB sandbox configuration without launching Blaxel or making a model call:
+
+```bash
+npm run attack-kb:sandbox-smoke
 ```
 
 Run one optional traced smoke call, which consumes OpenAI API usage and logs to Weave:
@@ -174,6 +181,11 @@ Like `main_agent`, this service runs each agent on its own **Blaxel** micro-VM
 for Weave tracing) and works from any host. `BLAXEL_SANDBOX_NAME`, if set, is
 used as a per-agent name prefix. See `agents/sub_agents/README.md` for the full
 API and curl examples.
+
+Attack KB live sandbox agents use the same in-process `SubAgentService` pattern
+through `attack-kb/src/sandbox.ts`. Deterministic Attack KB demos/evals do not
+launch Blaxel; use `npm run attack-kb:sandbox-smoke` to inspect the sandbox config
+and missing live-launch env vars.
 
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`, and Attack KB model calls expect your local `OPENAI_API_KEY`.

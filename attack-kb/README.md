@@ -39,6 +39,20 @@ ATTACK_KB_CURATOR_MODEL=gpt-4.1
 ATTACK_KB_RECOMMENDER_MODEL=gpt-4.1
 ```
 
+## Sandbox agents
+
+Live Attack KB agents mirror the repo's existing Blaxel sandbox pattern from `agents/sub_agents/` through `attack-kb/src/sandbox.ts`.
+
+- deterministic demos/evals do not launch Blaxel;
+- `npm run attack-kb:sandbox-smoke` prints the sandbox config and missing live-launch env vars without making model calls;
+- actual sandbox agent creation requires `OPENAI_API_KEY`, `BL_API_KEY`, and `BL_WORKSPACE`;
+- live Attack KB agents run in isolated Blaxel micro-VMs and must not directly contact the Agent Under Test or receive raw Redis admin credentials.
+
+```bash
+npm run attack-kb:sandbox-smoke
+npm run attack-kb:sandbox-smoke sourceDiscovery "Find source gaps for credit-loan defensive evals."
+```
+
 ## Storage adapter
 
 Recommendations read canonical KB objects through `attack-kb/src/storage/`.
@@ -100,12 +114,13 @@ npm run attack-kb:curation-smoke
 npm run attack-kb:evals
 npm run attack-kb:demo
 npm run attack-kb:demo-smoke
+npm run attack-kb:sandbox-smoke
 npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 npm run typecheck
 npm run build
 ```
 
-`attack-kb:config` validates configuration without making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:evals` runs deterministic recommendation, ingestion, provenance, and curation-quality evals; if `WANDB_API_KEY` is set, the cases are wrapped in Weave traces. `attack-kb:demo` starts the main-agent flow demo; `attack-kb:demo-smoke` validates the demo API without a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
+`attack-kb:config` validates configuration without making a model call. `attack-kb:sandbox-smoke` prints Attack KB's Blaxel/SubAgentService sandbox configuration without launching Blaxel or making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:evals` runs deterministic recommendation, ingestion, provenance, and curation-quality evals; if `WANDB_API_KEY` is set, the cases are wrapped in Weave traces. `attack-kb:demo` starts the main-agent flow demo; `attack-kb:demo-smoke` validates the demo API without a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
 
 No-API rich-profile demo:
 
@@ -177,7 +192,8 @@ attack-kb/
   evals/          deterministic quality eval harness
   src/
     config.ts       env and per-role model config
-    runtime.ts      traced OpenAI runtime for subagents
+    runtime.ts      traced OpenAI runtime for direct model calls
+    sandbox.ts      Blaxel/SubAgentService sandbox adapter for live Attack KB agents
     print-config.ts non-calling config check
     probe-demo.ts   no-API probing recommendation demo
     ingest-demo.ts  no-OpenAI source/data ingestion and curation-candidate demo
