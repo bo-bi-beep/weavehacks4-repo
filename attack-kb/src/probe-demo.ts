@@ -39,4 +39,4 @@ const profile: AgentUnderTestProfile = rawArgs.includes("--rich-credit-loan")
     ? (JSON.parse(rawProfile) as AgentUnderTestProfile)
     : { domain: "credit_loan" };
 
-console.log(JSON.stringify(getAttackKbRecommendations(profile), null, 2));
+console.log(JSON.stringify(await getAttackKbRecommendations(profile), null, 2));

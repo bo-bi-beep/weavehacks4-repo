@@ -1,24 +1,37 @@
 import { randomUUID } from "node:crypto";
 
-import {
-  creditLoanBusinessAttackRoutes,
-  creditLoanDecisionFactors,
-  creditLoanDomainScenarios,
-  creditLoanReconProbes,
-  creditLoanSystemAttackPatterns,
-} from "./credit-loan/seeds.js";
+import { getDefaultAttackKbStorageAdapter, type AttackKbStorageAdapter } from "./storage/index.js";
 import type {
   AgentUnderTestProfile,
+  AttackKbCanonicalObject,
   AttackKbRef,
   AttackKbResponse,
   AttackRecommendation,
   BusinessAttackRoute,
+  DomainDecisionFactor,
+  DomainScenario,
   MissingInfo,
   ObservedDecisionFactor,
+  ReconProbe,
+  SystemAttackPattern,
 } from "./types.js";
 
 const SYSTEM_BOUNDARY =
   "Attack KB is advisory only. It never contacts Agent Under Test and never executes attacks; the main agent owns probing, orchestration, and delivery subagents. All recommendations are for synthetic defensive testing only.";
+
+export type AttackKbRecommendationOptions = {
+  requestId?: string;
+  generatedAt?: Date;
+  storage?: AttackKbStorageAdapter;
+};
+
+type CreditLoanKnowledge = {
+  decisionFactors: DomainDecisionFactor[];
+  reconProbes: ReconProbe[];
+  domainScenarios: DomainScenario[];
+  businessRoutes: BusinessAttackRoute[];
+  systemPatterns: SystemAttackPattern[];
+};
 
 function observedFactorRefs(profile: AgentUnderTestProfile): Set<string> {
   return new Set(profile.observedDecisionFactors?.map((observed) => observed.factorRef) ?? []);
@@ -28,22 +41,55 @@ function hasObservedDecisionFactors(profile: AgentUnderTestProfile): boolean {
   return observedFactorRefs(profile).size > 0;
 }
 
-function buildMissingInfo(profile: AgentUnderTestProfile = {}): MissingInfo[] {
+function isCanonicalObjectType<TObjectType extends AttackKbCanonicalObject["objectType"]>(
+  object: AttackKbCanonicalObject,
+  objectType: TObjectType,
+): object is AttackKbCanonicalObject<TObjectType> {
+  return object.objectType === objectType;
+}
+
+async function payloadsFor<TObjectType extends AttackKbCanonicalObject["objectType"]>(
+  storage: AttackKbStorageAdapter,
+  objectType: TObjectType,
+): Promise<AttackKbCanonicalObject<TObjectType>["payload"][]> {
+  const objects = await storage.list({ objectType, domain: "credit_loan" });
+  return objects.filter((object) => isCanonicalObjectType(object, objectType)).map((object) => object.payload);
+}
+
+async function loadCreditLoanKnowledge(storage: AttackKbStorageAdapter): Promise<CreditLoanKnowledge> {
+  const [decisionFactors, reconProbes, domainScenarios, businessRoutes, systemPatterns] = await Promise.all([
+    payloadsFor(storage, "domain_decision_factor"),
+    payloadsFor(storage, "recon_probe"),
+    payloadsFor(storage, "domain_scenario"),
+    payloadsFor(storage, "business_attack_route"),
+    payloadsFor(storage, "system_attack_pattern"),
+  ]);
+
+  return {
+    decisionFactors,
+    reconProbes,
+    domainScenarios,
+    businessRoutes,
+    systemPatterns,
+  };
+}
+
+function buildMissingInfo(profile: AgentUnderTestProfile, knowledge: CreditLoanKnowledge): MissingInfo[] {
   const observed = observedFactorRefs(profile);
 
-  return creditLoanDecisionFactors
+  return knowledge.decisionFactors
     .filter((factor) => !observed.has(factor.id))
     .map((factor) => ({
       key: factor.name,
       reason: `${factor.label} is a likely credit-loan decision factor, but the target's actual use of it has not been observed yet.`,
-      probeRefs: creditLoanReconProbes
+      probeRefs: knowledge.reconProbes
         .filter((probe) => probe.factorRefs.includes(factor.id))
         .map((probe) => probe.id),
     }));
 }
 
-function buildProbingRecommendations(): AttackRecommendation[] {
-  return creditLoanReconProbes.map((probe) => ({
+function buildProbingRecommendations(knowledge: CreditLoanKnowledge): AttackRecommendation[] {
+  return knowledge.reconProbes.map((probe) => ({
     id: `rec-${probe.id}`,
     phase: "probing",
     title: probe.title,
@@ -71,10 +117,10 @@ function summarizeObservedEvidence(
     .join("; ");
 }
 
-function matchingRoutes(profile: AgentUnderTestProfile): BusinessAttackRoute[] {
+function matchingRoutes(profile: AgentUnderTestProfile, knowledge: CreditLoanKnowledge): BusinessAttackRoute[] {
   const observed = observedFactorRefs(profile);
 
-  const routes = creditLoanBusinessAttackRoutes.filter((route) =>
+  const routes = knowledge.businessRoutes.filter((route) =>
     route.decisionFactorRefs.some((factorRef) => observed.has(factorRef)),
   );
 
@@ -86,11 +132,9 @@ function matchingRoutes(profile: AgentUnderTestProfile): BusinessAttackRoute[] {
   });
 }
 
-function expectedFindingsForRoute(route: BusinessAttackRoute): string[] {
-  const scenarios = creditLoanDomainScenarios.filter((scenario) => route.scenarioRefs.includes(scenario.id));
-  const patterns = creditLoanSystemAttackPatterns.filter((pattern) =>
-    route.systemPatternRefs.includes(pattern.id),
-  );
+function expectedFindingsForRoute(route: BusinessAttackRoute, knowledge: CreditLoanKnowledge): string[] {
+  const scenarios = knowledge.domainScenarios.filter((scenario) => route.scenarioRefs.includes(scenario.id));
+  const patterns = knowledge.systemPatterns.filter((pattern) => route.systemPatternRefs.includes(pattern.id));
 
   return [
     route.defensiveObjective,
@@ -99,14 +143,17 @@ function expectedFindingsForRoute(route: BusinessAttackRoute): string[] {
   ];
 }
 
-function buildAttackRecommendations(profile: AgentUnderTestProfile): AttackRecommendation[] {
+function buildAttackRecommendations(
+  profile: AgentUnderTestProfile,
+  knowledge: CreditLoanKnowledge,
+): AttackRecommendation[] {
   const observed = observedFactorRefs(profile);
   const observedFactors = profile.observedDecisionFactors ?? [];
 
-  return matchingRoutes(profile).map((route) => {
+  return matchingRoutes(profile, knowledge).map((route) => {
     const matchedFactorRefs = route.decisionFactorRefs.filter((factorRef) => observed.has(factorRef));
     const scenarioRefs = route.scenarioRefs.filter((scenarioRef) =>
-      creditLoanDomainScenarios.some(
+      knowledge.domainScenarios.some(
         (scenario) =>
           scenario.id === scenarioRef &&
           scenario.decisionFactorRefs.some((factorRef) => observed.has(factorRef)),
@@ -129,47 +176,54 @@ function buildAttackRecommendations(profile: AgentUnderTestProfile): AttackRecom
         rationale:
           "Compose the matched financial/domain route with system-level checks so the main agent can evaluate both business-decision reasoning and agent safety boundaries in one synthetic defensive test packet.",
       },
-      expectedFindings: expectedFindingsForRoute(route),
+      expectedFindings: expectedFindingsForRoute(route, knowledge),
       safetyBoundary: `${route.safetyBoundary} Do not turn this into instructions for obtaining credit, concealing debt, fabricating income, bypassing verification, or evading fraud controls.`,
     } satisfies AttackRecommendation;
   });
 }
 
-function buildKbRefs(): AttackKbRef[] {
+function buildKbRefs(knowledge: CreditLoanKnowledge): AttackKbRef[] {
   return [
-    ...creditLoanDecisionFactors.map((factor): AttackKbRef => ({
+    ...knowledge.decisionFactors.map((factor): AttackKbRef => ({
       id: factor.id,
       type: "DomainDecisionFactor",
+      storageType: "domain_decision_factor",
     })),
-    ...creditLoanReconProbes.map((probe): AttackKbRef => ({
+    ...knowledge.reconProbes.map((probe): AttackKbRef => ({
       id: probe.id,
       type: "ReconProbe",
+      storageType: "recon_probe",
     })),
-    ...creditLoanDomainScenarios.map((scenario): AttackKbRef => ({
+    ...knowledge.domainScenarios.map((scenario): AttackKbRef => ({
       id: scenario.id,
       type: "DomainScenario",
+      storageType: "domain_scenario",
     })),
-    ...creditLoanBusinessAttackRoutes.map((route): AttackKbRef => ({
+    ...knowledge.businessRoutes.map((route): AttackKbRef => ({
       id: route.id,
       type: "BusinessAttackRoute",
+      storageType: "business_attack_route",
     })),
-    ...creditLoanSystemAttackPatterns.map((pattern): AttackKbRef => ({
+    ...knowledge.systemPatterns.map((pattern): AttackKbRef => ({
       id: pattern.id,
       type: "SystemAttackPattern",
+      storageType: "system_attack_pattern",
     })),
   ];
 }
 
-export function getAttackKbRecommendations(
+export async function getAttackKbRecommendations(
   profile: AgentUnderTestProfile = {},
-  options: { requestId?: string; generatedAt?: Date } = {},
-): AttackKbResponse {
+  options: AttackKbRecommendationOptions = {},
+): Promise<AttackKbResponse> {
   const domain = profile.domain ?? "credit_loan";
 
   if (domain !== "credit_loan") {
     throw new Error(`Unsupported Attack KB domain for P0: ${domain}`);
   }
 
+  const storage = options.storage ?? getDefaultAttackKbStorageAdapter();
+  const knowledge = await loadCreditLoanKnowledge(storage);
   const generatedAt = options.generatedAt ?? new Date();
   const requestId = options.requestId ?? randomUUID();
 
@@ -180,9 +234,9 @@ export function getAttackKbRecommendations(
       domain,
       phase: "probing",
       systemBoundary: SYSTEM_BOUNDARY,
-      missingInfo: buildMissingInfo(profile),
-      recommendations: buildProbingRecommendations(),
-      kbRefs: buildKbRefs(),
+      missingInfo: buildMissingInfo(profile, knowledge),
+      recommendations: buildProbingRecommendations(knowledge),
+      kbRefs: buildKbRefs(knowledge),
     };
   }
 
@@ -192,8 +246,8 @@ export function getAttackKbRecommendations(
     domain,
     phase: "attack",
     systemBoundary: SYSTEM_BOUNDARY,
-    missingInfo: buildMissingInfo(profile),
-    recommendations: buildAttackRecommendations(profile),
-    kbRefs: buildKbRefs(),
+    missingInfo: buildMissingInfo(profile, knowledge),
+    recommendations: buildAttackRecommendations(profile, knowledge),
+    kbRefs: buildKbRefs(knowledge),
   };
 }

@@ -104,6 +104,114 @@ export type AttackRecommendation = {
   safetyBoundary: string;
 };
 
+export const ATTACK_KB_STORAGE_OBJECT_TYPES = [
+  "domain_decision_factor",
+  "recon_probe",
+  "domain_scenario",
+  "business_attack_route",
+  "system_attack_pattern",
+  "vulnerability",
+  "attack_pattern",
+  "payload_template",
+  "delivery_mode",
+  "success_signal",
+  "evidence_source",
+  "source_artifact",
+  "sample_code_snippet",
+] as const;
+
+export type AttackKbStorageObjectType = (typeof ATTACK_KB_STORAGE_OBJECT_TYPES)[number];
+
+export type Vulnerability = {
+  id: string;
+  domain?: AttackKbDomain;
+  title: string;
+  description: string;
+  category: "prompt_injection" | "tool_misuse" | "rag_memory" | "policy_bypass" | "business_logic";
+  severity?: "low" | "medium" | "high" | "critical";
+  safetyBoundary: string;
+};
+
+export type AttackPattern = {
+  id: string;
+  domain?: AttackKbDomain;
+  phase: AttackPhase;
+  title: string;
+  description: string;
+  vulnerabilityRefs: string[];
+  safetyBoundary: string;
+};
+
+export type PayloadTemplate = {
+  id: string;
+  title: string;
+  description: string;
+  template: string;
+  safetyBoundary: string;
+};
+
+export type DeliveryMode = {
+  id: string;
+  title: string;
+  description: string;
+  channel: "chat" | "tool_output" | "rag_document" | "memory" | "api";
+  safetyBoundary: string;
+};
+
+export type SuccessSignal = {
+  id: string;
+  title: string;
+  description: string;
+  observable: string;
+  safetyBoundary: string;
+};
+
+export type EvidenceSource = {
+  id: string;
+  title: string;
+  sourceType: "standard" | "paper" | "documentation" | "manual_seed" | "run_outcome";
+  url?: string;
+  description: string;
+  retrievedAt?: string;
+};
+
+export type SampleCodeSnippet = {
+  id: string;
+  title: string;
+  language: string;
+  code: string;
+  safetyBoundary: string;
+};
+
+export type AttackKbStoragePayloadByType = {
+  domain_decision_factor: DomainDecisionFactor;
+  recon_probe: ReconProbe;
+  domain_scenario: DomainScenario;
+  business_attack_route: BusinessAttackRoute;
+  system_attack_pattern: SystemAttackPattern;
+  vulnerability: Vulnerability;
+  attack_pattern: AttackPattern;
+  payload_template: PayloadTemplate;
+  delivery_mode: DeliveryMode;
+  success_signal: SuccessSignal;
+  evidence_source: EvidenceSource;
+  source_artifact: EvidenceSource;
+  sample_code_snippet: SampleCodeSnippet;
+};
+
+export type AttackKbCanonicalObject<TObjectType extends AttackKbStorageObjectType = AttackKbStorageObjectType> = {
+  id: string;
+  objectType: TObjectType;
+  domain?: AttackKbDomain;
+  title: string;
+  description?: string;
+  version: number;
+  updatedAt: string;
+  sourceRefs: string[];
+  tags: string[];
+  payload: AttackKbStoragePayloadByType[TObjectType];
+};
+
 export type AttackKbRef = {
   id: string;
   type:
@@ -112,6 +220,14 @@ export type AttackKbRef = {
     | "DomainScenario"
     | "BusinessAttackRoute"
     | "SystemAttackPattern";
+  storageType: Extract<
+    AttackKbStorageObjectType,
+    | "domain_decision_factor"
+    | "recon_probe"
+    | "domain_scenario"
+    | "business_attack_route"
+    | "system_attack_pattern"
+  >;
 };
 
 export type AttackKbResponse = {

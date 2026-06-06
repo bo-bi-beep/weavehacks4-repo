@@ -39,6 +39,51 @@ ATTACK_KB_CURATOR_MODEL=gpt-4.1
 ATTACK_KB_RECOMMENDER_MODEL=gpt-4.1
 ```
 
+## Storage adapter
+
+Recommendations read canonical KB objects through `attack-kb/src/storage/`.
+
+Canonical storage object types are aligned to the Attack KB taxonomy:
+
+- `domain_decision_factor`
+- `recon_probe`
+- `domain_scenario`
+- `business_attack_route`
+- `system_attack_pattern`
+- `vulnerability`
+- `attack_pattern`
+- `payload_template`
+- `delivery_mode`
+- `success_signal`
+- `evidence_source`
+- `source_artifact`
+- `sample_code_snippet`
+
+Default storage is local in-memory and works with no Redis service:
+
+```bash
+ATTACK_KB_STORAGE_ADAPTER=local
+```
+
+For a file-backed local fallback, use JSON storage:
+
+```bash
+ATTACK_KB_STORAGE_ADAPTER=json
+ATTACK_KB_LOCAL_STORAGE_PATH=attack-kb/.local/kb.json
+```
+
+Redis Iris is exposed as a configurable adapter boundary. This repo does not install a Redis Iris SDK yet; when selected, the stub delegates to the local seeded fallback unless fallback is disabled.
+
+```bash
+ATTACK_KB_STORAGE_ADAPTER=redis-iris
+ATTACK_KB_REDIS_IRIS_URL=redis://localhost:6379
+ATTACK_KB_REDIS_IRIS_INDEX=attack-kb-objects
+ATTACK_KB_REDIS_IRIS_NAMESPACE=attack-kb
+ATTACK_KB_REDIS_IRIS_FALLBACK=local # or disabled
+```
+
+Wire the real Redis Iris client inside `attack-kb/src/storage/redis-iris.ts` when the SDK/runtime is available. The recommendation flow already depends only on the `AttackKbStorageAdapter` interface, so the main path does not need to change.
+
 ## Commands
 
 From repo root:
@@ -79,10 +124,11 @@ attack-kb/
     runtime.ts      traced OpenAI runtime for subagents
     print-config.ts non-calling config check
     probe-demo.ts   no-API probing recommendation demo
-    recommendations.ts deterministic recommendation entrypoint
+    recommendations.ts deterministic recommendation entrypoint backed by storage adapter
     smoke.ts        optional traced runtime smoke test
-    types.ts        P0 request/response/domain types
+    types.ts        P0 request/response/domain/storage object types
     credit-loan/    credit-loan probe, scenario, and route seeds
+    storage/        storage interface, local memory/json fallback, Redis Iris adapter boundary
 ```
 
 Current deterministic KB entities include:
@@ -92,4 +138,4 @@ Current deterministic KB entities include:
 - `BusinessAttackRoute` — defensive business-route checks that compose financial factors with system-level patterns.
 - `AttackRecommendation` — output DTO. Probing recommendations reference `ReconProbe`; rich-profile attack recommendations include `composition`, `businessAttackRouteRefs`, `domainScenarioRefs`, and `systemPatternRefs`.
 
-Future issues will add Redis Iris storage, curation UI, and evals.
+Future issues will add a concrete Redis Iris client implementation, curation UI, and evals.
