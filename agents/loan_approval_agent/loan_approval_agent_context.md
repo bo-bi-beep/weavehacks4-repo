@@ -66,7 +66,17 @@ CREATE TABLE loan_decisions (
 
 ## Scoring Methodology
 
-**Decision threshold: weighted total ≥ 0.50 → APPROVE, < 0.50 → DENY**
+**Decision threshold — scales with requested loan amount (larger loans require a higher score):**
+
+| Requested Amount | Min Score to Approve |
+|---|---|
+| < $10,000 | 0.45 |
+| $10,000 – $49,999 | 0.50 |
+| $50,000 – $149,999 | 0.60 |
+| $150,000 – $499,999 | 0.70 |
+| ≥ $500,000 | 0.80 |
+
+`compute_score` returns the applicable `threshold` field alongside `weighted_total` and `approve`.
 
 ### Category 1 — Credit Score & History (weight: 0.25)
 
