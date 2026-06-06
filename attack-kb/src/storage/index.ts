@@ -1,5 +1,7 @@
 import { join } from "node:path";
 
+import { readAttackKbRedisConnectionConfig, type AttackKbRedisUrlSource } from "../redis/client.js";
+import type { AttackKbCanonicalObject } from "../types.js";
 import { createLocalAttackKbStorageAdapter } from "./local.js";
 import { createRedisIrisAttackKbStorageAdapter } from "./redis-iris.js";
 import { buildSeedAttackKbObjects } from "./seeds.js";
@@ -7,7 +9,7 @@ import type { AttackKbStorageAdapter } from "./types.js";
 
 export type { AttackKbStorageAdapter, AttackKbStorageQuery } from "./types.js";
 
-export const ATTACK_KB_STORAGE_ADAPTERS = ["local", "json", "redis-iris"] as const;
+export const ATTACK_KB_STORAGE_ADAPTERS = ["local", "json", "redis-iris", "redis"] as const;
 export type AttackKbStorageProvider = (typeof ATTACK_KB_STORAGE_ADAPTERS)[number];
 
 export type AttackKbStorageConfig = {
@@ -15,6 +17,7 @@ export type AttackKbStorageConfig = {
   localJsonPath: string;
   redisIris: {
     url?: string;
+    urlSource?: AttackKbRedisUrlSource;
     indexName: string;
     namespace: string;
     fallbackToLocal: boolean;
@@ -50,19 +53,67 @@ function parseFallback(value: string | undefined): boolean {
   }
 
   throw new Error(
-    `Unsupported ATTACK_KB_REDIS_IRIS_FALLBACK: ${value}. Use "local" or "disabled".`,
+    `Unsupported ATTACK_KB_REDIS_IRIS_FALLBACK: ${value}. Use "local"/"true" or "disabled"/"false".`,
   );
 }
 
 export function getAttackKbStorageConfig(): AttackKbStorageConfig {
+  const redisConnection = readAttackKbRedisConnectionConfig();
+
   return {
     provider: parseProvider(env("ATTACK_KB_STORAGE_ADAPTER")),
     localJsonPath: env("ATTACK_KB_LOCAL_STORAGE_PATH") || join(process.cwd(), "attack-kb", ".local", "kb.json"),
     redisIris: {
-      url: env("ATTACK_KB_REDIS_IRIS_URL"),
+      url: redisConnection.url,
+      urlSource: redisConnection.urlSource,
       indexName: env("ATTACK_KB_REDIS_IRIS_INDEX") || "attack-kb-objects",
       namespace: env("ATTACK_KB_REDIS_IRIS_NAMESPACE") || "attack-kb",
       fallbackToLocal: parseFallback(env("ATTACK_KB_REDIS_IRIS_FALLBACK")),
+    },
+  };
+}
+
+function seedAdapterWhenEmpty(
+  adapter: AttackKbStorageAdapter,
+  seedObjects: AttackKbCanonicalObject[],
+): AttackKbStorageAdapter {
+  let seedPromise: Promise<void> | undefined;
+
+  async function ensureSeeded(): Promise<void> {
+    if (seedObjects.length === 0) {
+      return;
+    }
+
+    seedPromise ??= (async () => {
+      const existing = await adapter.list({ limit: 1 });
+      if (existing.length === 0) {
+        await adapter.putMany(seedObjects);
+      }
+    })().catch((error: unknown) => {
+      seedPromise = undefined;
+      throw error;
+    });
+
+    await seedPromise;
+  }
+
+  return {
+    ...adapter,
+    async put(object) {
+      await ensureSeeded();
+      await adapter.put(object);
+    },
+    async putMany(objects) {
+      await ensureSeeded();
+      await adapter.putMany(objects);
+    },
+    async get(id) {
+      await ensureSeeded();
+      return adapter.get(id);
+    },
+    async list(query) {
+      await ensureSeeded();
+      return adapter.list(query);
     },
   };
 }
@@ -87,13 +138,16 @@ export function createAttackKbStorageAdapter(
     });
   }
 
-  return createRedisIrisAttackKbStorageAdapter({
-    config: config.redisIris,
-    fallback: createLocalAttackKbStorageAdapter({
-      name: "attack-kb-redis-iris-local-fallback",
-      seedObjects,
+  return seedAdapterWhenEmpty(
+    createRedisIrisAttackKbStorageAdapter({
+      config: config.redisIris,
+      fallback: createLocalAttackKbStorageAdapter({
+        name: "attack-kb-redis-iris-local-fallback",
+        seedObjects,
+      }),
     }),
-  });
+    seedObjects,
+  );
 }
 
 let defaultAdapter: AttackKbStorageAdapter | undefined;

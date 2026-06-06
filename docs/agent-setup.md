@@ -36,6 +36,10 @@ export ATTACK_KB_SOURCE_RETRIEVAL_MODEL=gpt-4.1-mini
 export ATTACK_KB_CREDIBILITY_TRIAGE_MODEL=gpt-4.1
 export ATTACK_KB_CURATOR_MODEL=gpt-4.1
 export ATTACK_KB_RECOMMENDER_MODEL=gpt-4.1
+
+# Optional Attack KB LLM cache. Keep disabled unless you want local/Redis exact-key caching.
+export ATTACK_KB_LLM_CACHE=disabled # disabled | local | redis
+export ATTACK_KB_LLM_CACHE_TTL_SECONDS=86400
 ```
 
 ## Attack KB runtime
@@ -57,7 +61,7 @@ Check the Attack KB sandbox configuration without launching Blaxel or making a m
 npm run attack-kb:sandbox-smoke
 ```
 
-Run one optional traced smoke call, which consumes OpenAI API usage and logs to Weave:
+Run one optional traced smoke call, which consumes OpenAI API usage and logs to Weave. If `ATTACK_KB_LLM_CACHE=local` or `redis`, the recommendation-builder smoke path is wrapped by the exact-key semantic-cache seam using the `recommendation-explanation` task scope:
 
 ```bash
 npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"

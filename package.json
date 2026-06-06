@@ -9,6 +9,7 @@
     "sub:agents": "tsx agents/sub_agents/server.ts",
     "weave:smoke": "tsx src/smoke.ts",
     "attack-kb:config": "tsx attack-kb/src/print-config.ts",
+    "attack-kb:redis-health": "tsx attack-kb/src/redis/health.ts",
     "attack-kb:probe": "tsx attack-kb/src/probe-demo.ts",
     "attack-kb:ingest": "tsx attack-kb/src/ingest-demo.ts",
     "attack-kb:curation-ui": "tsx attack-kb/src/curation/server.ts",
@@ -17,6 +18,7 @@
     "attack-kb:demo": "tsx attack-kb/src/demo/server.ts",
     "attack-kb:demo-smoke": "tsx attack-kb/src/demo/smoke.ts",
     "attack-kb:sandbox-smoke": "tsx attack-kb/src/sandbox-smoke.ts",
+    "attack-kb:redis-smoke": "tsx attack-kb/src/storage/redis-smoke.ts",
     "attack-kb:smoke": "tsx attack-kb/src/smoke.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json"
@@ -27,6 +29,7 @@
     "@openai/agents-extensions": "^0.11.6",
     "dotenv": "^17.4.2",
     "openai": "^6.42.0",
+    "redis": "^6.0.0",
     "weave": "^0.15.1"
   },
   "devDependencies": {

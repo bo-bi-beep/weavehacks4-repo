@@ -39,6 +39,32 @@ ATTACK_KB_CURATOR_MODEL=gpt-4.1
 ATTACK_KB_RECOMMENDER_MODEL=gpt-4.1
 ```
 
+## LLM semantic-cache seam
+
+`attack-kb/src/cache/` provides a LangCache-ready seam for model paths. P0 uses exact keys derived from `model + task scope + input` and stores each task scope under its own key path so cache entries cannot cross-contaminate.
+
+Supported task scopes:
+
+- `source-triage`
+- `curation-review`
+- `recommendation-explanation`
+- `eval-scorer`
+
+The cache is disabled by default. Enable local in-memory caching or Redis-backed exact-key caching with TTL:
+
+```bash
+ATTACK_KB_LLM_CACHE=disabled # disabled | local | redis
+ATTACK_KB_LLM_CACHE_TTL_SECONDS=86400
+ATTACK_KB_REDIS_CACHE_URL=redis://localhost:6379
+ATTACK_KB_REDIS_CACHE_KEY_PREFIX=attack-kb:llm-cache
+ATTACK_KB_REDIS_CACHE_FALLBACK=local # or disabled for strict Redis
+ATTACK_KB_REDIS_CACHE_TIMEOUT_MS=2000
+```
+
+Redis mode writes JSON cache entries with Redis `EX` TTL. If Redis is unavailable and fallback is `local`, the runtime fails open to process-local memory and emits one warning. `ATTACK_KB_LLM_CACHE=disabled` is a no-op cache that always calls the loader.
+
+The optional `attack-kb:smoke` OpenAI path is wrapped with the `recommendation-explanation` scope. Deterministic recommendation demos and evals do not call OpenAI and are not changed by this cache seam. Deferred LangCache-specific work: semantic similarity lookup, embedding/index management, invalidation policies, and hit-quality metrics.
+
 ## Sandbox agents
 
 Live Attack KB agents mirror the repo's existing Blaxel sandbox pattern from `agents/sub_agents/` through `attack-kb/src/sandbox.ts`, while keeping Attack KB role files under `agents/attack_kb/`.
@@ -99,17 +125,66 @@ ATTACK_KB_STORAGE_ADAPTER=json
 ATTACK_KB_LOCAL_STORAGE_PATH=attack-kb/.local/kb.json
 ```
 
-Redis Iris is exposed as a configurable adapter boundary. This repo does not install a Redis Iris SDK yet; when selected, the stub delegates to the local seeded fallback unless fallback is disabled.
+Redis-backed storage uses the official `redis` npm client. Prefer a Redis Cloud compatible URL (`rediss://...` when TLS is required). `ATTACK_KB_REDIS_IRIS_URL` is kept for the original adapter naming and takes precedence over `REDIS_URL`; `ATTACK_KB_STORAGE_ADAPTER=redis` and `redis-iris` both select the Redis path.
 
 ```bash
-ATTACK_KB_STORAGE_ADAPTER=redis-iris
-ATTACK_KB_REDIS_IRIS_URL=redis://localhost:6379
+ATTACK_KB_STORAGE_ADAPTER=redis-iris # or redis
+REDIS_URL=redis://localhost:6379
+# ATTACK_KB_REDIS_IRIS_URL=rediss://default:<password>@your-redis-cloud-host:port
 ATTACK_KB_REDIS_IRIS_INDEX=attack-kb-objects
 ATTACK_KB_REDIS_IRIS_NAMESPACE=attack-kb
-ATTACK_KB_REDIS_IRIS_FALLBACK=local # or disabled
+ATTACK_KB_REDIS_IRIS_FALLBACK=local # local/true/1, or disabled/false/0
+ATTACK_KB_REDIS_KEY_PREFIX=attack-kb
+ATTACK_KB_REDIS_EVENTS_STREAM=attack-kb:events
+ATTACK_KB_REDIS_CURATION_STREAM=attack-kb:curation:events
 ```
 
-Wire the real Redis Iris client inside `attack-kb/src/storage/redis-iris.ts` when the SDK/runtime is available. The recommendation flow already depends only on the `AttackKbStorageAdapter` interface, so the main path does not need to change.
+The adapter stores canonical objects in RedisJSON when `JSON.SET`/`JSON.GET` are available, otherwise it falls back to Redis string `SET`/`GET` JSON values under the same namespaced keys. The default storage factory seeds a fresh Redis namespace with canonical KB seeds on first use via `putMany`, matching the local demo behavior. If the Redis URL is missing or the connection fails, `ATTACK_KB_REDIS_IRIS_FALLBACK=local` keeps the seeded local fallback for demos; disabling fallback makes configuration/connection failures throw clear errors.
+
+Optional Redis smoke against a local Redis/Redis Stack or Redis Cloud instance:
+
+```bash
+npm run attack-kb:redis-smoke
+```
+
+The smoke command writes the canonical seed objects through Redis and reads one back; it requires `REDIS_URL` or `ATTACK_KB_REDIS_IRIS_URL` and does not use the local fallback.
+
+## Agent Memory adapter
+
+Run/outcome memory lives under `attack-kb/src/memory/` and is separate from canonical KB storage. It exposes `recordMemory`, `searchMemory`, and `listRecent` across these namespaces:
+
+- `attack-kb-runs`
+- `target-observations`
+- `curation`
+- `recommendation-outcomes`
+- `subagent-reports`
+
+Default memory config uses an in-process local fallback. Set a Redis URL to persist records as JSON string values plus recent-record sorted sets:
+
+```bash
+ATTACK_KB_MEMORY_ADAPTER=auto # auto, local, or redis
+ATTACK_KB_MEMORY_REDIS_URL=redis://localhost:6379
+ATTACK_KB_MEMORY_REDIS_PREFIX=attack-kb:memory
+ATTACK_KB_MEMORY_REDIS_FALLBACK=local # or disabled
+ATTACK_KB_MEMORY_REDIS_TIMEOUT_MS=1500
+```
+
+If `ATTACK_KB_MEMORY_REDIS_URL` is unset, auto mode reuses `ATTACK_KB_REDIS_IRIS_URL` when present; otherwise it stays local-memory. Redis keys use:
+
+```text
+<prefix>:record:<namespace>:<id>
+<prefix>:recent:<namespace>
+<prefix>:recent:all
+```
+
+This is a Redis key-value Agent Memory seam, not a final Redis Iris/Agent Memory service SDK integration. If the sponsor service exposes a different API, replace the implementation behind `AttackKbMemoryAdapter` without changing the recommendation/demo call sites.
+
+Redis observability/security guidance lives in [`docs/redis-observability-security.md`](docs/redis-observability-security.md). The safe report command prints sanitized config and intended Redis names without contacting Redis unless `ATTACK_KB_REDIS_HEALTH_CONNECT=1` is set:
+
+```bash
+npm run attack-kb:redis-health
+ATTACK_KB_REDIS_HEALTH_CONNECT=1 npm run attack-kb:redis-health
+```
 
 ## Commands
 
@@ -117,6 +192,7 @@ From repo root:
 
 ```bash
 npm run attack-kb:config
+npm run attack-kb:redis-health
 npm run attack-kb:probe
 npm run attack-kb:ingest
 npm run attack-kb:curation-ui -- --seed-demo
@@ -125,12 +201,13 @@ npm run attack-kb:evals
 npm run attack-kb:demo
 npm run attack-kb:demo-smoke
 npm run attack-kb:sandbox-smoke
+npm run attack-kb:redis-smoke
 npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 npm run typecheck
 npm run build
 ```
 
-`attack-kb:config` validates configuration without making a model call. `attack-kb:sandbox-smoke` prints Attack KB's Blaxel/SubAgentService sandbox configuration without launching Blaxel or making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:evals` runs deterministic recommendation, ingestion, provenance, and curation-quality evals; if `WANDB_API_KEY` is set, the cases are wrapped in Weave traces. `attack-kb:demo` starts the main-agent flow demo; `attack-kb:demo-smoke` validates the demo API without a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
+`attack-kb:config` validates configuration without making a model call. `attack-kb:redis-health` prints sanitized Redis config/readiness and intended key/index/stream names; it stays report-only unless `ATTACK_KB_REDIS_HEALTH_CONNECT=1` is set. `attack-kb:sandbox-smoke` prints Attack KB's Blaxel/SubAgentService sandbox configuration without launching Blaxel or making a model call. `attack-kb:redis-smoke` is an optional networked Redis round trip that writes canonical seed objects and reads one back when a Redis URL is configured. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:evals` runs deterministic recommendation, ingestion, provenance, and curation-quality evals; if `WANDB_API_KEY` is set, the cases are wrapped in Weave traces. `attack-kb:demo` starts the main-agent flow demo; `attack-kb:demo-smoke` validates the demo API without a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime unless the exact-key LLM cache hits.
 
 No-API rich-profile demo:
 
@@ -197,6 +274,7 @@ The rich-profile path uses only synthetic defensive testing language. A profile 
 ```text
 attack-kb/
   README.md
+  docs/           Redis observability/security and source-reference docs
   skills/
     use-attack-kb/SKILL.md main-agent procedure for using recommendation packets
   evals/          deterministic quality eval harness
@@ -214,7 +292,10 @@ attack-kb/
     credit-loan/    credit-loan probe, scenario, and route seeds
     curation/       queue primitive plus local HITL curation UI, API, auto-review, and smoke test
     ingestion/      source/data ingestion entrypoints, samples, and Weave tracing wrapper
-    storage/        storage interface, local memory/json fallback, Redis Iris adapter boundary
+    cache/          exact-key LLM cache seam with no-op, local, and Redis providers
+    redis/          Redis client/env helper, streams/event support, and health/config report command
+    memory/         run/outcome Agent Memory adapter with local fallback and Redis KV backend
+    storage/        storage interface, local memory/json fallback, Redis-backed adapter
 ```
 
 Current deterministic KB entities include:
@@ -224,4 +305,4 @@ Current deterministic KB entities include:
 - `BusinessAttackRoute` — defensive business-route checks that compose financial factors with system-level patterns.
 - `AttackRecommendation` — output DTO. Probing recommendations reference `ReconProbe`; rich-profile attack recommendations include `composition`, `businessAttackRouteRefs`, `domainScenarioRefs`, and `systemPatternRefs`.
 
-Future follow-up work can replace the Redis Iris stub with a concrete client and connect the main attack agent to this subsystem over its final API boundary.
+Future follow-up work can add Redis query-engine/vector/streams/memory/cache usage and connect the main attack agent to this subsystem over its final API boundary.

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { initWeave, weave } from "../../../src/lib/weave.js";
+import { recordAttackKbEvent } from "../redis/streams.js";
 import { getDefaultAttackKbStorageAdapter, type AttackKbStorageAdapter } from "../storage/index.js";
 import type {
   AttackKbCanonicalObject,
@@ -619,6 +620,23 @@ export async function autoReviewCurationCandidate(
   const action = actionForAutoReview(context);
   const score = context.confidence.averageConfidence ?? 0;
   const trace = traceState(options.trace);
+  await recordAttackKbEvent({
+    type: "auto_review_requested",
+    source: "attack-kb.curation.service",
+    payload: {
+      candidateId,
+      reviewerKind: "auto",
+      reviewerId: "deterministic-curation-reviewer",
+      proposedObjectCount: context.proposedObjects.length,
+      evidenceCount: context.confidence.evidenceCount,
+      averageConfidence: context.confidence.averageConfidence,
+      trace,
+      storage: {
+        adapter: storage.name,
+        backend: storage.backend,
+      },
+    },
+  });
   const rationale =
     action === "accept"
       ? "Auto-review found high-confidence evidence and concrete proposed canonical objects. Human confirmation is still required."
@@ -640,6 +658,25 @@ export async function autoReviewCurationCandidate(
   });
 
   await storage.put(decision);
+  await recordAttackKbEvent({
+    type: "curation_review_decision_created",
+    source: "attack-kb.curation.service",
+    timestamp: decision.updatedAt,
+    payload: {
+      decisionId: decision.id,
+      candidateId,
+      mode: decision.payload.mode,
+      reviewer: decision.payload.reviewer,
+      action,
+      score,
+      persistedObjectRefs: decision.payload.persistedObjectRefs ?? [],
+      weaveTrace: trace,
+      storage: {
+        adapter: storage.name,
+        backend: storage.backend,
+      },
+    },
+  });
   await traceCurationEvent(
     {
       eventType: "auto_review",
@@ -698,6 +735,26 @@ export async function recordCurationDecision(
   });
   await storage.put(decision);
   const candidate = await updateCandidateStatus(storage, context, input.action);
+  await recordAttackKbEvent({
+    type: "curation_review_decision_created",
+    source: "attack-kb.curation.service",
+    timestamp: decision.updatedAt,
+    payload: {
+      decisionId: decision.id,
+      candidateId,
+      mode: decision.payload.mode,
+      reviewer: decision.payload.reviewer,
+      action: input.action,
+      score: input.score,
+      persistedObjectRefs: decision.payload.persistedObjectRefs ?? [],
+      candidateStatus: candidate.payload.status,
+      weaveTrace: trace,
+      storage: {
+        adapter: storage.name,
+        backend: storage.backend,
+      },
+    },
+  });
 
   await traceCurationEvent(
     {

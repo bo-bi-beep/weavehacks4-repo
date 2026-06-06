@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 
+import { recordMemory } from "./memory/index.js";
+import { recordAttackKbEvent } from "./redis/streams.js";
 import { getDefaultAttackKbStorageAdapter, type AttackKbStorageAdapter } from "./storage/index.js";
 import type {
   AgentUnderTestProfile,
   AttackKbCanonicalObject,
+  AttackKbMemoryAdapter,
   AttackKbRef,
   AttackKbResponse,
   AttackRecommendation,
@@ -23,6 +26,7 @@ export type AttackKbRecommendationOptions = {
   requestId?: string;
   generatedAt?: Date;
   storage?: AttackKbStorageAdapter;
+  memory?: AttackKbMemoryAdapter | false;
 };
 
 type CreditLoanKnowledge = {
@@ -212,6 +216,62 @@ function buildKbRefs(knowledge: CreditLoanKnowledge): AttackKbRef[] {
   ];
 }
 
+let warnedAboutRecommendationMemory = false;
+
+function warnRecommendationMemorySkipped(error: unknown): void {
+  if (warnedAboutRecommendationMemory) {
+    return;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  process.emitWarning(`Attack KB recommendation memory recording skipped. ${message}`, {
+    code: "ATTACK_KB_MEMORY_RECORD_SKIPPED",
+  });
+  warnedAboutRecommendationMemory = true;
+}
+
+async function recordRecommendationRunMemory(
+  profile: AgentUnderTestProfile,
+  response: AttackKbResponse,
+  options: AttackKbRecommendationOptions,
+): Promise<void> {
+  if (options.memory === false) {
+    return;
+  }
+
+  try {
+    await recordMemory(
+      "attack-kb-runs",
+      {
+        runId: response.requestId,
+        summary: `Attack KB generated ${response.phase} recommendations for ${response.domain}.`,
+        text: [
+          `phase=${response.phase}`,
+          `recommendations=${response.recommendations.map((recommendation) => recommendation.id).join(",")}`,
+          `missingInfo=${response.missingInfo.map((info) => info.key).join(",")}`,
+        ].join("\n"),
+        tags: ["recommendation-run", response.domain, response.phase],
+        source: "attack_kb",
+        safetyBoundary: response.systemBoundary,
+        payload: {
+          requestId: response.requestId,
+          domain: response.domain,
+          phase: response.phase,
+          profileSnapshot: profile,
+          recommendationIds: response.recommendations.map((recommendation) => recommendation.id),
+          missingInfoKeys: response.missingInfo.map((info) => info.key),
+          kbRefIds: response.kbRefs.map((ref) => ref.id),
+          directAutContactByAttackKb: false,
+          safeSyntheticOnly: true,
+        },
+      },
+      options.memory ? { adapter: options.memory } : undefined,
+    );
+  } catch (error) {
+    warnRecommendationMemorySkipped(error);
+  }
+}
+
 export async function getAttackKbRecommendations(
   profile: AgentUnderTestProfile = {},
   options: AttackKbRecommendationOptions = {},
@@ -227,27 +287,46 @@ export async function getAttackKbRecommendations(
   const generatedAt = options.generatedAt ?? new Date();
   const requestId = options.requestId ?? randomUUID();
 
-  if (!hasObservedDecisionFactors(profile)) {
-    return {
-      requestId,
-      generatedAt: generatedAt.toISOString(),
-      domain,
-      phase: "probing",
-      systemBoundary: SYSTEM_BOUNDARY,
-      missingInfo: buildMissingInfo(profile, knowledge),
-      recommendations: buildProbingRecommendations(knowledge),
-      kbRefs: buildKbRefs(knowledge),
-    };
-  }
+  const response: AttackKbResponse = !hasObservedDecisionFactors(profile)
+    ? {
+        requestId,
+        generatedAt: generatedAt.toISOString(),
+        domain,
+        phase: "probing",
+        systemBoundary: SYSTEM_BOUNDARY,
+        missingInfo: buildMissingInfo(profile, knowledge),
+        recommendations: buildProbingRecommendations(knowledge),
+        kbRefs: buildKbRefs(knowledge),
+      }
+    : {
+        requestId,
+        generatedAt: generatedAt.toISOString(),
+        domain,
+        phase: "attack",
+        systemBoundary: SYSTEM_BOUNDARY,
+        missingInfo: buildMissingInfo(profile, knowledge),
+        recommendations: buildAttackRecommendations(profile, knowledge),
+        kbRefs: buildKbRefs(knowledge),
+      };
 
-  return {
-    requestId,
-    generatedAt: generatedAt.toISOString(),
-    domain,
-    phase: "attack",
-    systemBoundary: SYSTEM_BOUNDARY,
-    missingInfo: buildMissingInfo(profile, knowledge),
-    recommendations: buildAttackRecommendations(profile, knowledge),
-    kbRefs: buildKbRefs(knowledge),
-  };
+  await recordAttackKbEvent({
+    type: "recommendation_requested",
+    source: "attack-kb.recommendations",
+    timestamp: response.generatedAt,
+    payload: {
+      requestId: response.requestId,
+      domain: response.domain,
+      phase: response.phase,
+      missingInfoCount: response.missingInfo.length,
+      recommendationCount: response.recommendations.length,
+      observedDecisionFactorCount: profile.observedDecisionFactors?.length ?? 0,
+      kbRefCount: response.kbRefs.length,
+      storage: {
+        adapter: storage.name,
+        backend: storage.backend,
+      },
+    },
+  });
+  await recordRecommendationRunMemory(profile, response, options);
+  return response;
 }

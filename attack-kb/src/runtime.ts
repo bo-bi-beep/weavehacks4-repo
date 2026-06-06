@@ -2,6 +2,10 @@ import { OpenAI } from "openai";
 
 import { initWeave, requireEnv, weave } from "../../src/lib/weave.js";
 import {
+  getDefaultAttackKbLlmCache,
+  type AttackKbLlmCache,
+} from "./cache/index.js";
+import {
   type AttackKbAgentRole,
   type AttackKbAgentModelConfig,
   getAttackKbAgentModelConfig,
@@ -13,6 +17,7 @@ export type AttackKbAgentRuntime = {
   model: string;
   modelConfig: AttackKbAgentModelConfig;
   client: OpenAI;
+  llmCache: AttackKbLlmCache;
 };
 
 let tracedOpenAIClient: OpenAI | undefined;
@@ -42,5 +47,6 @@ export async function createAttackKbAgentRuntime(role: AttackKbAgentRole): Promi
     model: modelConfig.model,
     modelConfig,
     client: getTracedOpenAIClient(),
+    llmCache: getDefaultAttackKbLlmCache(),
   };
 }

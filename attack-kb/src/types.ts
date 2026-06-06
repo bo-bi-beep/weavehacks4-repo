@@ -104,6 +104,146 @@ export type AttackRecommendation = {
   safetyBoundary: string;
 };
 
+export const ATTACK_KB_MEMORY_NAMESPACES = [
+  "attack-kb-runs",
+  "target-observations",
+  "curation",
+  "recommendation-outcomes",
+  "subagent-reports",
+] as const;
+
+export type AttackKbMemoryNamespace = (typeof ATTACK_KB_MEMORY_NAMESPACES)[number];
+
+export type AttackKbMemorySource =
+  | "attack_kb"
+  | "main_agent"
+  | "delivery_subagent"
+  | "curation"
+  | "human"
+  | "demo"
+  | "manual";
+
+export type AttackKbRunMemory = {
+  requestId: string;
+  domain: AttackKbDomain;
+  phase: AttackPhase;
+  profileSnapshot: AgentUnderTestProfile;
+  recommendationIds: string[];
+  missingInfoKeys: string[];
+  kbRefIds: string[];
+  directAutContactByAttackKb: false;
+  safeSyntheticOnly: true;
+};
+
+export type AttackKbTargetObservationMemory = {
+  observationId: string;
+  observedBy: Extract<AttackKbMemorySource, "main_agent" | "delivery_subagent" | "human" | "demo">;
+  domain: AttackKbDomain;
+  observedBehavior: ObservedBehavior[];
+  observedDecisionFactors: ObservedDecisionFactor[];
+  profilePatch?: AgentUnderTestProfile;
+  evidenceSummary: string;
+  recommendationIds?: string[];
+  directAutContactByAttackKb: false;
+  safeSyntheticOnly: true;
+};
+
+export type AttackKbCurationMemory = {
+  curationEventId: string;
+  candidateId?: string;
+  decisionId?: string;
+  status: "queued" | "review_required" | "accepted" | "rejected" | "merged" | "proposal_recorded";
+  summary: string;
+  objectRefs: { id: string; storageType?: string }[];
+  directAutContactByAttackKb: false;
+  safeSyntheticOnly: true;
+};
+
+export type AttackKbRecommendationOutcomeMemory = {
+  outcomeId: string;
+  requestId?: string;
+  recommendationId: string;
+  outcome: "observed" | "not_observed" | "partially_observed" | "blocked" | "unsafe_skipped";
+  reportedBy: Extract<AttackKbMemorySource, "main_agent" | "delivery_subagent" | "human" | "demo">;
+  observationSummary: string;
+  evidence?: string;
+  confidence?: number;
+  nextStep?: "continue" | "reprobe" | "curation" | "stop";
+  directAutContactByAttackKb: false;
+  safeSyntheticOnly: true;
+};
+
+export type AttackKbSubagentReportMemory = {
+  reportId: string;
+  subagentId: string;
+  recommendationId?: string;
+  assignedPhase: AttackPhase | "delivery";
+  status: "assigned" | "completed" | "blocked" | "unsafe_skipped";
+  observationSummary: string;
+  evidence?: string;
+  confidence?: number;
+  directAutContactByAttackKb: false;
+  safeSyntheticOnly: true;
+};
+
+export type AttackKbMemoryPayloadByNamespace = {
+  "attack-kb-runs": AttackKbRunMemory;
+  "target-observations": AttackKbTargetObservationMemory;
+  curation: AttackKbCurationMemory;
+  "recommendation-outcomes": AttackKbRecommendationOutcomeMemory;
+  "subagent-reports": AttackKbSubagentReportMemory;
+};
+
+export type AttackKbMemoryRecord<TNamespace extends AttackKbMemoryNamespace = AttackKbMemoryNamespace> = {
+  id: string;
+  namespace: TNamespace;
+  runId?: string;
+  recommendationId?: string;
+  summary: string;
+  text: string;
+  tags: string[];
+  createdAt: string;
+  source: AttackKbMemorySource;
+  safetyBoundary: string;
+  payload: AttackKbMemoryPayloadByNamespace[TNamespace];
+};
+
+export type AttackKbMemoryRecordInput<TNamespace extends AttackKbMemoryNamespace> = {
+  id?: string;
+  runId?: string;
+  recommendationId?: string;
+  summary: string;
+  text?: string;
+  tags?: string[];
+  createdAt?: string | Date;
+  source: AttackKbMemorySource;
+  safetyBoundary?: string;
+  payload: AttackKbMemoryPayloadByNamespace[TNamespace];
+};
+
+export type AttackKbMemorySearchQuery = {
+  namespace?: AttackKbMemoryNamespace;
+  text?: string;
+  tags?: string[];
+  runId?: string;
+  recommendationId?: string;
+  limit?: number;
+};
+
+export type AttackKbMemoryBackend = "local-memory" | "redis";
+
+export type AttackKbMemoryAdapter = {
+  name: string;
+  backend: AttackKbMemoryBackend;
+  recordMemory<TNamespace extends AttackKbMemoryNamespace>(
+    namespace: TNamespace,
+    input: AttackKbMemoryRecordInput<TNamespace>,
+  ): Promise<AttackKbMemoryRecord<TNamespace>>;
+  searchMemory(query: AttackKbMemorySearchQuery): Promise<AttackKbMemoryRecord[]>;
+  listRecent(namespace?: AttackKbMemoryNamespace, limit?: number): Promise<AttackKbMemoryRecord[]>;
+  close?(): Promise<void>;
+};
+
 export const ATTACK_KB_STORAGE_OBJECT_TYPES = [
   "domain_decision_factor",
   "recon_probe",

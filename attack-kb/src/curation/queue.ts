@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { recordAttackKbEvent } from "../redis/streams.js";
 import { getDefaultAttackKbStorageAdapter, type AttackKbStorageAdapter } from "../storage/index.js";
 import type {
   AttackKbCanonicalObject,
@@ -106,6 +107,26 @@ export async function enqueueCurationCandidate(
   };
 
   await storage.put(buildCandidateObject(candidate));
+  await recordAttackKbEvent({
+    type: "curation_candidate_created",
+    source: "attack-kb.curation.queue",
+    timestamp: firedAt,
+    payload: {
+      candidateId: candidate.id,
+      candidateType: candidate.candidateType,
+      objectRef: candidate.objectRef,
+      sourceCategory: candidate.sourceCategory,
+      triggeredBy: candidate.triggeredBy,
+      suggestedObjectTypes: candidate.suggestedObjectTypes,
+      evidenceCount: candidate.evidence.length,
+      queue: candidate.curationFlow.flow,
+      status: candidate.status,
+      storage: {
+        adapter: storage.name,
+        backend: storage.backend,
+      },
+    },
+  });
 
   return {
     candidate,

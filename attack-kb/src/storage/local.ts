@@ -2,7 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { AttackKbCanonicalObject } from "../types.js";
-import type { AttackKbStorageAdapter, AttackKbStorageQuery } from "./types.js";
+import { matchesAttackKbStorageQuery } from "./query.js";
+import type { AttackKbStorageAdapter } from "./types.js";
 
 type LocalAttackKbStoreFile = {
   schemaVersion: 1;
@@ -14,42 +15,6 @@ export type LocalAttackKbStorageOptions = {
   seedObjects?: AttackKbCanonicalObject[];
   jsonPath?: string;
 };
-
-function matchesQuery(object: AttackKbCanonicalObject, query: AttackKbStorageQuery): boolean {
-  if (query.objectType && object.objectType !== query.objectType) {
-    return false;
-  }
-
-  if (query.domain && object.domain !== query.domain) {
-    return false;
-  }
-
-  if (query.ids && !query.ids.includes(object.id)) {
-    return false;
-  }
-
-  if (query.text) {
-    const needle = query.text.toLowerCase();
-    const haystack = [
-      object.id,
-      object.objectType,
-      object.domain,
-      object.title,
-      object.description,
-      object.tags.join(" "),
-      JSON.stringify(object.payload),
-    ]
-      .filter(Boolean)
-      .join("\n")
-      .toLowerCase();
-
-    if (!haystack.includes(needle)) {
-      return false;
-    }
-  }
-
-  return true;
-}
 
 function parseStoreFile(raw: string, jsonPath: string): AttackKbCanonicalObject[] {
   const parsed = JSON.parse(raw) as Partial<LocalAttackKbStoreFile>;
@@ -132,7 +97,7 @@ export function createLocalAttackKbStorageAdapter(
     },
     async list(query = {}) {
       await ensureLoaded();
-      const results = [...objects.values()].filter((object) => matchesQuery(object, query));
+      const results = [...objects.values()].filter((object) => matchesAttackKbStorageQuery(object, query));
       return typeof query.limit === "number" ? results.slice(0, query.limit) : results;
     },
   };

@@ -1,4 +1,5 @@
 import { getWeaveProjectName } from "../../../src/lib/weave.js";
+import { recordMemory } from "../memory/index.js";
 import { getAttackKbRecommendations } from "../recommendations.js";
 import type { AgentUnderTestProfile, AttackKbResponse, AttackRecommendation } from "../types.js";
 
@@ -82,10 +83,56 @@ function taskFromRecommendation(recommendation: AttackRecommendation, index: num
   };
 }
 
+let warnedAboutDemoMemory = false;
+
+function warnDemoMemorySkipped(error: unknown): void {
+  if (warnedAboutDemoMemory) {
+    return;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  process.emitWarning(`Attack KB demo memory recording skipped. ${message}`, {
+    code: "ATTACK_KB_DEMO_MEMORY_SKIPPED",
+  });
+  warnedAboutDemoMemory = true;
+}
+
+async function recordDemoTargetObservationMemory(attackResponse: AttackKbResponse): Promise<void> {
+  try {
+    await recordMemory("target-observations", {
+      runId: attackResponse.requestId,
+      summary: "Demo main-agent observed credit-loan target factors for Attack KB recommendations.",
+      text:
+        "Synthetic demo observations supplied by the main-agent flow; Attack KB did not contact the Agent Under Test.",
+      tags: ["demo", "target-observation", "credit-loan"],
+      source: "demo",
+      safetyBoundary: attackResponse.systemBoundary,
+      payload: {
+        observationId: `demo-observed-profile-${attackResponse.requestId}`,
+        observedBy: "demo",
+        domain: "credit_loan",
+        observedBehavior: demoObservedCreditLoanProfile.observedBehavior ?? [],
+        observedDecisionFactors: demoObservedCreditLoanProfile.observedDecisionFactors ?? [],
+        profilePatch: demoObservedCreditLoanProfile,
+        evidenceSummary:
+          "Demo transcript placeholders from main-agent probing, not Attack KB target contact or direct attack execution.",
+        recommendationIds: attackResponse.recommendations.map((recommendation) => recommendation.id),
+        directAutContactByAttackKb: false,
+        safeSyntheticOnly: true,
+      },
+    });
+  } catch (error) {
+    warnDemoMemorySkipped(error);
+  }
+}
+
 export async function buildAttackKbMainAgentDemoFlow(): Promise<AttackKbMainAgentDemoFlow> {
   const initialAttackRequest: AgentUnderTestProfile = { domain: "credit_loan" };
   const probingResponse = await getAttackKbRecommendations(initialAttackRequest);
   const attackResponse = await getAttackKbRecommendations(demoObservedCreditLoanProfile);
+  const deliverySubagentTasks = attackResponse.recommendations.slice(0, 3).map(taskFromRecommendation);
+
+  await recordDemoTargetObservationMemory(attackResponse);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -98,7 +145,7 @@ export async function buildAttackKbMainAgentDemoFlow(): Promise<AttackKbMainAgen
       probingResponse,
       mainAgentObservedProfile: demoObservedCreditLoanProfile,
       attackResponse,
-      deliverySubagentTasks: attackResponse.recommendations.slice(0, 3).map(taskFromRecommendation),
+      deliverySubagentTasks,
     },
   };
 }

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { initWeave, weave } from "../../../src/lib/weave.js";
 import { enqueueCurationCandidate, type CurationFlowEvent } from "../curation/queue.js";
+import { recordAttackKbEvent } from "../redis/streams.js";
 import { getDefaultAttackKbStorageAdapter, type AttackKbStorageAdapter } from "../storage/index.js";
 import { ATTACK_KB_SOURCE_CATEGORIES } from "../types.js";
 import type {
@@ -204,8 +205,23 @@ async function ingestSourceUntraced(
   const storage = options.storage ?? getDefaultAttackKbStorageAdapter();
   const now = options.now ?? new Date();
   const object = buildSourceObject(input, now);
+  const ingestionId = `ingest-${randomUUID()}`;
 
   await storage.put(object);
+  await recordAttackKbEvent({
+    type: "source_ingested",
+    source: "attack-kb.ingestion",
+    timestamp: now.toISOString(),
+    payload: {
+      ingestionId,
+      objectId: object.id,
+      objectType: object.objectType,
+      category: input.category,
+      evidenceCount: object.payload.evidence.length,
+      suggestedObjectTypes: input.suggestedObjectTypes ?? [],
+      storage: storageSummary(storage),
+    },
+  });
 
   const { candidate, curationFlow } = await enqueueCurationCandidate(
     {
@@ -223,7 +239,7 @@ async function ingestSourceUntraced(
   );
 
   return {
-    ingestionId: `ingest-${randomUUID()}`,
+    ingestionId,
     ingestedAt: now.toISOString(),
     storage: storageSummary(storage),
     object,
@@ -241,8 +257,24 @@ async function ingestDataItemUntraced(
   const storage = options.storage ?? getDefaultAttackKbStorageAdapter();
   const now = options.now ?? new Date();
   const object = buildDataItemObject(input, now);
+  const ingestionId = `ingest-${randomUUID()}`;
 
   await storage.put(object);
+  await recordAttackKbEvent({
+    type: "data_item_ingested",
+    source: "attack-kb.ingestion",
+    timestamp: now.toISOString(),
+    payload: {
+      ingestionId,
+      objectId: object.id,
+      objectType: object.objectType,
+      category: input.category,
+      sourceRef: input.sourceRef,
+      evidenceCount: object.payload.evidence.length,
+      suggestedObjectTypes: input.suggestedObjectTypes ?? [],
+      storage: storageSummary(storage),
+    },
+  });
 
   const { candidate, curationFlow } = await enqueueCurationCandidate(
     {
@@ -260,7 +292,7 @@ async function ingestDataItemUntraced(
   );
 
   return {
-    ingestionId: `ingest-${randomUUID()}`,
+    ingestionId,
     ingestedAt: now.toISOString(),
     storage: storageSummary(storage),
     object,

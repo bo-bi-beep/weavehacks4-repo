@@ -1,14 +1,18 @@
 import "dotenv/config";
 
+import { getAttackKbLlmCacheConfig } from "./cache/index.js";
 import {
   ATTACK_KB_AGENT_ROLES,
   getAttackKbRuntimeConfig,
   validateAttackKbRuntimeEnv,
 } from "./config.js";
+import { getAttackKbMemoryConfig } from "./memory/index.js";
 import { getAttackKbStorageConfig } from "./storage/index.js";
 
 const config = getAttackKbRuntimeConfig();
 const storageConfig = getAttackKbStorageConfig();
+const memoryConfig = getAttackKbMemoryConfig();
+const cacheConfig = getAttackKbLlmCacheConfig();
 const missing = validateAttackKbRuntimeEnv(config);
 
 console.log(
@@ -28,9 +32,29 @@ console.log(
         localJsonPath: storageConfig.localJsonPath,
         redisIris: {
           url: storageConfig.redisIris.url ? "set" : "missing",
+          urlSource: storageConfig.redisIris.urlSource ?? null,
           indexName: storageConfig.redisIris.indexName,
           namespace: storageConfig.redisIris.namespace,
           fallbackToLocal: storageConfig.redisIris.fallbackToLocal,
+        },
+      },
+      memory: {
+        adapter: memoryConfig.provider,
+        redis: {
+          url: memoryConfig.redis.url ? "set" : "missing",
+          keyPrefix: memoryConfig.redis.keyPrefix,
+          fallbackToLocal: memoryConfig.redis.fallbackToLocal,
+          timeoutMs: memoryConfig.redis.timeoutMs,
+        },
+      },
+      llmCache: {
+        provider: cacheConfig.provider,
+        ttlSeconds: cacheConfig.ttlSeconds,
+        redis: {
+          url: cacheConfig.redis.url ? "set" : "missing",
+          keyPrefix: cacheConfig.redis.keyPrefix,
+          fallbackToLocal: cacheConfig.redis.fallbackToLocal,
+          timeoutMs: cacheConfig.redis.timeoutMs,
         },
       },
       missing,

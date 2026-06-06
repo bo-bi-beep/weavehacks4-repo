@@ -3,6 +3,7 @@ import "dotenv/config";
 import { initWeave, weave } from "../../src/lib/weave.js";
 import { autoReviewCurationCandidate, recordCurationDecision } from "../src/curation/service.js";
 import { ingestAttackKbDataItem, ingestAttackKbSource } from "../src/ingestion/index.js";
+import { recordAttackKbEvent } from "../src/redis/streams.js";
 import { buildSampleMaestroDataItem, sampleOwaspAgenticSource } from "../src/ingestion/sample.js";
 import { getAttackKbRecommendations } from "../src/recommendations.js";
 import type { AgentUnderTestProfile, AttackKbResponse } from "../src/types.js";
@@ -296,6 +297,17 @@ async function runEvalSuite(): Promise<EvalRunResult> {
 }
 
 const result = await runEvalSuite();
+await recordAttackKbEvent({
+  type: "eval_run_completed",
+  source: "attack-kb.evals",
+  timestamp: result.generatedAt,
+  payload: {
+    ok: result.ok,
+    trace: result.trace,
+    totals: result.totals,
+    caseIds: result.cases.map((item) => item.id),
+  },
+});
 console.log(JSON.stringify(result, null, 2));
 
 if (!result.ok) {
