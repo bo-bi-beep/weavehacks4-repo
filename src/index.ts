@@ -34,8 +34,12 @@ const prompt =
   process.argv.slice(2).join(" ").trim() ||
   "Help solo hackers turn messy AI ideas into a clear 48-hour demo with visible agent traces.";
 
-await initWeave();
+const tracing = await initWeave();
 
-console.log(`Tracing to W&B Weave project: ${getWeaveProjectName()}`);
+console.log(
+  tracing
+    ? `Tracing to W&B Weave project: ${getWeaveProjectName()}`
+    : "Weave tracing disabled (set WANDB_API_KEY to enable).",
+);
 console.log();
 console.log(await brainstormHackathonAngle(prompt));
