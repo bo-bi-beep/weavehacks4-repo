@@ -11,6 +11,8 @@
     "attack-kb:config": "tsx attack-kb/src/print-config.ts",
     "attack-kb:probe": "tsx attack-kb/src/probe-demo.ts",
     "attack-kb:ingest": "tsx attack-kb/src/ingest-demo.ts",
+    "attack-kb:curation-ui": "tsx attack-kb/src/curation/server.ts",
+    "attack-kb:curation-smoke": "tsx attack-kb/src/curation/smoke.ts",
     "attack-kb:smoke": "tsx attack-kb/src/smoke.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json"

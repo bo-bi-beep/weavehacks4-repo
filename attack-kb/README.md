@@ -57,6 +57,9 @@ Canonical storage object types are aligned to the Attack KB taxonomy:
 - `success_signal`
 - `evidence_source`
 - `source_artifact`
+- `ingested_data_item`
+- `curation_candidate`
+- `curation_review_decision`
 - `sample_code_snippet`
 
 Default storage is local in-memory and works with no Redis service:
@@ -92,12 +95,14 @@ From repo root:
 npm run attack-kb:config
 npm run attack-kb:probe
 npm run attack-kb:ingest
+npm run attack-kb:curation-ui -- --seed-demo
+npm run attack-kb:curation-smoke
 npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 npm run typecheck
 npm run build
 ```
 
-`attack-kb:config` validates configuration without making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
+`attack-kb:config` validates configuration without making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
 
 No-API rich-profile demo:
 
@@ -109,9 +114,29 @@ No-OpenAI ingestion/curation demo:
 
 ```bash
 npm run attack-kb:ingest
+npm run attack-kb:curation-ui -- --seed-demo
+# open http://localhost:3010, or ATTACK_KB_CURATION_UI_PORT=3100 npm run attack-kb:curation-ui
+```
+
+For review decisions that survive process restarts, use the existing JSON storage adapter:
+
+```bash
+ATTACK_KB_STORAGE_ADAPTER=json \
+ATTACK_KB_LOCAL_STORAGE_PATH=attack-kb/.local/kb.json \
+npm run attack-kb:curation-ui -- --seed-demo
 ```
 
 The ingestion path uses `attack-kb/src/ingestion/` and the curation queue primitive in `attack-kb/src/curation/`. New source artifacts and ingested data items are written through the configured storage adapter, then immediately enqueue a `curation_candidate` and fire the `manual_review_queue` flow. Source/data payloads carry provenance and evidence metadata (`originLabel`, publisher/url/version where available, retrieval time, standards refs, evidence excerpts, confidence, and locator). Categories include standards-backed language for `owasp`, `mitre_atlas`, `nist_ai_rmf_genai`, and `maestro_agentic_risk`, plus research/vendor/manual categories. If `WANDB_API_KEY` is set and no custom storage/date options are passed, `weave.op` traces the ingestion entrypoints without requiring any OpenAI call.
+
+The curation UI lives under `attack-kb/src/curation/` and keeps the full review context on screen for each pending candidate: source object, provenance, extracted evidence, proposed canonical objects, related artifacts, confidence summary, and review history. A reviewer can:
+
+- run deterministic auto-review to pre-score and propose `accept`, `reject`, `edit`, or `merge`;
+- accept selected proposed objects into canonical storage;
+- reject a candidate with rationale;
+- edit the proposed canonical-object JSON before accepting;
+- merge candidate provenance into an existing related object.
+
+Auto-review proposals and human decisions are persisted as `curation_review_decision` canonical objects. Human decisions update the candidate status and, for accept/edit/merge, persist promoted or merged canonical objects through the configured storage adapter. Curation events call a `weave.op` trace when `WANDB_API_KEY` is configured; without W&B credentials the same flow runs locally and records `weaveTrace: disabled_missing_wandb_api_key`.
 
 Custom observed profile example:
 
@@ -138,7 +163,7 @@ attack-kb/
     smoke.ts        optional traced runtime smoke test
     types.ts        P0 request/response/domain/storage object types
     credit-loan/    credit-loan probe, scenario, and route seeds
-    curation/       queue primitive that stores candidates and fires review flow events
+    curation/       queue primitive plus local HITL curation UI, API, auto-review, and smoke test
     ingestion/      source/data ingestion entrypoints, samples, and Weave tracing wrapper
     storage/        storage interface, local memory/json fallback, Redis Iris adapter boundary
 ```

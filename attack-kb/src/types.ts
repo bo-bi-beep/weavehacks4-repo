@@ -119,6 +119,7 @@ export const ATTACK_KB_STORAGE_OBJECT_TYPES = [
   "source_artifact",
   "ingested_data_item",
   "curation_candidate",
+  "curation_review_decision",
   "sample_code_snippet",
 ] as const;
 
@@ -187,7 +188,7 @@ export type CurationCandidate = {
     storageType: Extract<AttackKbStorageObjectType, "source_artifact" | "ingested_data_item">;
   };
   sourceCategory: AttackKbSourceCategory;
-  status: "queued" | "review_required" | "accepted" | "rejected";
+  status: "queued" | "review_required" | "accepted" | "rejected" | "merged";
   reason: string;
   suggestedObjectTypes: AttackKbStorageObjectType[];
   evidence: SourceEvidence[];
@@ -199,6 +200,35 @@ export type CurationCandidate = {
     status: "fired";
     notes: string[];
   };
+};
+
+export type CurationReviewDecisionAction = "accept" | "reject" | "edit" | "merge";
+
+export type CurationReviewDecision = {
+  id: string;
+  candidateRef: {
+    id: string;
+    storageType: Extract<AttackKbStorageObjectType, "curation_candidate">;
+  };
+  mode: "proposal" | "decision";
+  reviewer: {
+    kind: "human" | "agent" | "auto";
+    id: string;
+  };
+  action: CurationReviewDecisionAction;
+  score?: number;
+  rationale: string;
+  mergeTargetRef?: {
+    id: string;
+    storageType: AttackKbStorageObjectType;
+  };
+  editedObjects?: AttackKbCanonicalObject[];
+  persistedObjectRefs?: {
+    id: string;
+    storageType: AttackKbStorageObjectType;
+  }[];
+  createdAt: string;
+  weaveTrace: "enabled" | "disabled_missing_wandb_api_key" | "disabled_by_caller";
 };
 
 export type Vulnerability = {
@@ -279,6 +309,7 @@ export type AttackKbStoragePayloadByType = {
   source_artifact: SourceArtifact;
   ingested_data_item: IngestedDataItem;
   curation_candidate: CurationCandidate;
+  curation_review_decision: CurationReviewDecision;
   sample_code_snippet: SampleCodeSnippet;
 };
 
