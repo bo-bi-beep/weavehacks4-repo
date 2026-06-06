@@ -23,6 +23,7 @@ npm run typecheck
 npm run weave:smoke -- "an agent with visible evals and traces"
 npm run attack-kb:config
 npm run attack-kb:probe
+npm run attack-kb:evals
 npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 npm run dev -- "help me turn inbox triage into a weekend demo"
 ```
@@ -57,6 +58,7 @@ No secrets should be committed. Put real values in local `.env` only.
 - `npm run weave:smoke -- "idea"`
 - `npm run attack-kb:config` — verifies `OPENAI_API_KEY` + `WANDB_API_KEY` presence and prints selected subagent models
 - `npm run attack-kb:probe` — returns deterministic probing recommendations for an empty credit-loan profile, no API keys required
+- `npm run attack-kb:evals` — runs deterministic quality evals; traces to W&B Weave when `WANDB_API_KEY` is set
 - `npm run attack-kb:smoke -- "prompt"` — makes one traced OpenAI call through the Attack KB recommendation-builder runtime
 - `npm run dev -- "problem statement"`
 - `npm run main:agent -- "task for the sandbox agent"`

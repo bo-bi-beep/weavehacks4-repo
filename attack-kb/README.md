@@ -97,12 +97,13 @@ npm run attack-kb:probe
 npm run attack-kb:ingest
 npm run attack-kb:curation-ui -- --seed-demo
 npm run attack-kb:curation-smoke
+npm run attack-kb:evals
 npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 npm run typecheck
 npm run build
 ```
 
-`attack-kb:config` validates configuration without making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
+`attack-kb:config` validates configuration without making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:evals` runs deterministic recommendation, ingestion, provenance, and curation-quality evals; if `WANDB_API_KEY` is set, the cases are wrapped in Weave traces. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
 
 No-API rich-profile demo:
 
@@ -138,6 +139,14 @@ The curation UI lives under `attack-kb/src/curation/` and keeps the full review 
 
 Auto-review proposals and human decisions are persisted as `curation_review_decision` canonical objects. Human decisions update the candidate status and, for accept/edit/merge, persist promoted or merged canonical objects through the configured storage adapter. Curation events call a `weave.op` trace when `WANDB_API_KEY` is configured; without W&B credentials the same flow runs locally and records `weaveTrace: disabled_missing_wandb_api_key`.
 
+Quality evals:
+
+```bash
+npm run attack-kb:evals
+```
+
+The eval suite lives in `attack-kb/evals/`. It covers empty-profile probing, rich-profile composed recommendations, source ingestion provenance, curation auto-review, persisted human review decisions, and the no-direct-Agent-Under-Test boundary. The evals do not call OpenAI. With `WANDB_API_KEY`, the eval cases appear in W&B Weave traces.
+
 Custom observed profile example:
 
 ```bash
@@ -153,6 +162,7 @@ attack-kb/
   README.md
   skills/
     use-attack-kb/SKILL.md main-agent procedure for using recommendation packets
+  evals/          deterministic quality eval harness
   src/
     config.ts       env and per-role model config
     runtime.ts      traced OpenAI runtime for subagents
@@ -175,4 +185,4 @@ Current deterministic KB entities include:
 - `BusinessAttackRoute` — defensive business-route checks that compose financial factors with system-level patterns.
 - `AttackRecommendation` — output DTO. Probing recommendations reference `ReconProbe`; rich-profile attack recommendations include `composition`, `businessAttackRouteRefs`, `domainScenarioRefs`, and `systemPatternRefs`.
 
-Future issues will add a concrete Redis Iris client implementation, curation UI, and evals.
+Future issues will add a concrete Redis Iris client implementation and the final main-agent flow demo surface.

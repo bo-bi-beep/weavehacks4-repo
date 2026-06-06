@@ -10,5 +10,5 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["src/**/*.ts", "attack-kb/src/**/*.ts"]
+  "include": ["src/**/*.ts", "attack-kb/src/**/*.ts", "attack-kb/evals/**/*.ts"]
 }
