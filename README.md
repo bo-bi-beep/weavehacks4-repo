@@ -35,7 +35,7 @@ Fill in:
 - `WANDB_ENTITY`
 - `WANDB_PROJECT`
 - `OPENAI_API_KEY`
-- `BL_API_KEY` / `BL_WORKSPACE` (Blaxel sandbox — needed for `npm run main:agent`)
+- `BL_API_KEY` / `BL_WORKSPACE` (Blaxel sandbox — needed for `npm run main:agent` and `npm run sub:agents`)
 - optional: `OPENAI_MODEL`, `BLAXEL_SANDBOX_IMAGE`, `BLAXEL_SANDBOX_MEMORY`, `BLAXEL_SANDBOX_REGION`
 
 ## Handy commands
