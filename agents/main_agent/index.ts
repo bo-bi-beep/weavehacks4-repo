@@ -60,11 +60,12 @@ export const mainAgent = new SandboxAgent({
   capabilities: [shell()],
 });
 
-// Weave-traced entry point so the full sandbox run is visible in the demo trace.
-// The compute now runs on a Blaxel sandbox (instant-launch micro-VM) instead of
-// a local Unix process; the runner creates the session from `defaultManifest`
-// and tears it down when the run finishes.
-export const runMainAgent = weave.op(async function runMainAgent(prompt: string) {
+// Weave-traced sandbox run so the full run is visible in the demo trace. The
+// compute runs on a Blaxel sandbox (instant-launch micro-VM) instead of a local
+// Unix process; the runner creates the session from `defaultManifest` and tears
+// it down when the run finishes. `weave.op` only records a span once Weave has
+// been initialized, which `runMainAgent` below guarantees before calling this.
+const runMainAgentTraced = weave.op(async function runMainAgent(prompt: string) {
   const result = await run(mainAgent, prompt, {
     sandbox: {
       client: new BlaxelSandboxClient(getBlaxelSandboxOptions()),
@@ -73,6 +74,15 @@ export const runMainAgent = weave.op(async function runMainAgent(prompt: string)
 
   return result.finalOutput ?? "";
 });
+
+// Public entry point for the main agent. Initializes Weave first so the run is
+// traced whether it is launched from the CLI (`main`) or imported and reused by
+// a sub-agent / orchestrator (see this folder's README). `initWeave` is
+// idempotent, so calling it here and in `main` is a cheap no-op after the first.
+export async function runMainAgent(prompt: string): Promise<string> {
+  await initWeave();
+  return runMainAgentTraced(prompt);
+}
 
 async function main(): Promise<void> {
   requireEnv("OPENAI_API_KEY");
