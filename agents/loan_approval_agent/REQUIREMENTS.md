@@ -1,0 +1,32 @@
+Loan Approval Agent
+- Overall picture:
+    - This is an agent that decides whether to approve or deny a user reuested loan based on the user info and some evaluation rules.
+    - There will be some attacker agents trying to flip the loan approval decision (originally approve -> now deny, or originally deny -> now approve). But this part is NOT in-scope of this project (SO DO NOT IMPLEMENT ATTACKERS). We only need to provide an API for the user input, where the attacker is just one of the users. Note that the attacker knows the context of the loan approval agent to make attacking plans.
+    - This whole system's purpose is to find the vulnerability of the loan approval agent and fix that vulnerability. This is why the attacker has the loan approval agent's context.
+
+- Main Features:
+    - Running continuously and listen to user request.
+    - Create a new session for each user. The user can use this session to talk to the agent.
+    - The agent has a basic context about what information it needs for approval/denial. This is stored in the database keyed by the username.
+    - If some info is missing from the user request, the agent asks the user for that information. However, the user's response is not trustworthy. All info used for approval/denial decision is from the side input (user info database).
+    - After all evaluations, the agent calls a function called `ProcessLoan(bool approve)`, where the param `approve` means whether it approves the loan or not (true = approve, false = deny).
+    - The agent should be backed by OpenAI model. Give me a place to input my OpenAI key (DO NOT PUSH THE KEY itself to the Git repo).
+- Input:
+    - User initial request.
+    - User-input additional info.
+- Side input:
+    - All user information stored in a database, keyed by the username.
+- Output:
+    - Call `ProcessLoan(string username, bool approve)` to approve/deny the loan. This function stores the approval/denial decision to the databse.
+    - Tell the user if his/her loan has been approved/denied.
+- Side Output (this is for the attacker agent to read and make attacking plan):
+    - All the context the loan approval agent uses for decision making.
+
+- Open questions/requirements:
+    - What info in addition to the following info is needed for approval/denial? Let's not have too many factors for now. But we can add more factors later.
+        - Credit score.
+        - Annual income.
+        - Loan amount the user requests. This should be from the user request, other than originally stored in the database.
+        - Current loan amount.
+    - If all info needed for approval/denial is from the database, what other info should the agent asks for?
+    - Use the most lightweight database for storing the user info.
