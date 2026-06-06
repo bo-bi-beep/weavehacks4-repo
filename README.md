@@ -6,6 +6,7 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - TypeScript/Node starter with Weave helpers in `src/lib/weave.ts`
 - OpenAI + Weave example path in `src/index.ts`
 - Weave smoke test in `src/smoke.ts`
+- Python `SubAgentManager` for parallel FinTech loan-agent red teaming in `agents/sub_agent_manager.py`
 - Minimal OpenAI Sandbox Agent in `agents/main_agent/` (`npm run main:agent`)
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
@@ -19,6 +20,12 @@ npm install
 npm run typecheck
 npm run weave:smoke -- "an agent with visible evals and traces"
 npm run dev -- "help me turn inbox triage into a weekend demo"
+```
+
+Python red-team demo:
+```bash
+python3.10 -m pip install -r requirements.txt
+python3.10 -m agents.sub_agent_manager
 ```
 
 ## Env vars
