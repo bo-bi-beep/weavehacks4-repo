@@ -117,10 +117,89 @@ export const ATTACK_KB_STORAGE_OBJECT_TYPES = [
   "success_signal",
   "evidence_source",
   "source_artifact",
+  "ingested_data_item",
+  "curation_candidate",
   "sample_code_snippet",
 ] as const;
 
 export type AttackKbStorageObjectType = (typeof ATTACK_KB_STORAGE_OBJECT_TYPES)[number];
+
+export const ATTACK_KB_SOURCE_CATEGORIES = [
+  "owasp",
+  "mitre_atlas",
+  "nist_ai_rmf_genai",
+  "maestro_agentic_risk",
+  "research_paper",
+  "vendor_documentation",
+  "manual_observation",
+] as const;
+
+export type AttackKbSourceCategory = (typeof ATTACK_KB_SOURCE_CATEGORIES)[number];
+
+export type EvidenceSourceType = "standard" | "paper" | "documentation" | "manual_seed" | "run_outcome";
+
+export type SourceProvenance = {
+  category: AttackKbSourceCategory;
+  originLabel: string;
+  publisher?: string;
+  url?: string;
+  retrievedAt: string;
+  retrievedBy: "manual" | "source_discovery_agent" | "source_retrieval_agent" | "import_script";
+  sourceVersion?: string;
+  standardsRefs: string[];
+  license?: string;
+};
+
+export type SourceEvidence = {
+  summary: string;
+  excerpt?: string;
+  locator?: string;
+  confidence: number;
+  observedAt: string;
+};
+
+export type SourceArtifact = {
+  id: string;
+  title: string;
+  sourceType: EvidenceSourceType;
+  category: AttackKbSourceCategory;
+  url?: string;
+  description: string;
+  provenance: SourceProvenance;
+  evidence: SourceEvidence[];
+};
+
+export type IngestedDataItem = {
+  id: string;
+  title: string;
+  dataType: "standard_excerpt" | "agentic_risk_note" | "run_observation" | "manual_note";
+  sourceRef?: string;
+  content: string;
+  provenance: SourceProvenance;
+  evidence: SourceEvidence[];
+};
+
+export type CurationCandidate = {
+  id: string;
+  candidateType: "source_artifact" | "ingested_data_item";
+  objectRef: {
+    id: string;
+    storageType: Extract<AttackKbStorageObjectType, "source_artifact" | "ingested_data_item">;
+  };
+  sourceCategory: AttackKbSourceCategory;
+  status: "queued" | "review_required" | "accepted" | "rejected";
+  reason: string;
+  suggestedObjectTypes: AttackKbStorageObjectType[];
+  evidence: SourceEvidence[];
+  createdAt: string;
+  triggeredBy: "source_ingestion" | "data_item_ingestion";
+  curationFlow: {
+    flow: "manual_review_queue";
+    firedAt: string;
+    status: "fired";
+    notes: string[];
+  };
+};
 
 export type Vulnerability = {
   id: string;
@@ -169,10 +248,12 @@ export type SuccessSignal = {
 export type EvidenceSource = {
   id: string;
   title: string;
-  sourceType: "standard" | "paper" | "documentation" | "manual_seed" | "run_outcome";
+  sourceType: EvidenceSourceType;
   url?: string;
   description: string;
   retrievedAt?: string;
+  provenance?: SourceProvenance;
+  evidence?: SourceEvidence[];
 };
 
 export type SampleCodeSnippet = {
@@ -195,7 +276,9 @@ export type AttackKbStoragePayloadByType = {
   delivery_mode: DeliveryMode;
   success_signal: SuccessSignal;
   evidence_source: EvidenceSource;
-  source_artifact: EvidenceSource;
+  source_artifact: SourceArtifact;
+  ingested_data_item: IngestedDataItem;
+  curation_candidate: CurationCandidate;
   sample_code_snippet: SampleCodeSnippet;
 };
 

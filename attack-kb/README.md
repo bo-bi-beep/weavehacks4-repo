@@ -91,18 +91,27 @@ From repo root:
 ```bash
 npm run attack-kb:config
 npm run attack-kb:probe
+npm run attack-kb:ingest
 npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 npm run typecheck
 npm run build
 ```
 
-`attack-kb:config` validates configuration without making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
+`attack-kb:config` validates configuration without making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
 
 No-API rich-profile demo:
 
 ```bash
 npm run attack-kb:probe -- --rich-credit-loan
 ```
+
+No-OpenAI ingestion/curation demo:
+
+```bash
+npm run attack-kb:ingest
+```
+
+The ingestion path uses `attack-kb/src/ingestion/` and the curation queue primitive in `attack-kb/src/curation/`. New source artifacts and ingested data items are written through the configured storage adapter, then immediately enqueue a `curation_candidate` and fire the `manual_review_queue` flow. Source/data payloads carry provenance and evidence metadata (`originLabel`, publisher/url/version where available, retrieval time, standards refs, evidence excerpts, confidence, and locator). Categories include standards-backed language for `owasp`, `mitre_atlas`, `nist_ai_rmf_genai`, and `maestro_agentic_risk`, plus research/vendor/manual categories. If `WANDB_API_KEY` is set and no custom storage/date options are passed, `weave.op` traces the ingestion entrypoints without requiring any OpenAI call.
 
 Custom observed profile example:
 
@@ -124,10 +133,13 @@ attack-kb/
     runtime.ts      traced OpenAI runtime for subagents
     print-config.ts non-calling config check
     probe-demo.ts   no-API probing recommendation demo
+    ingest-demo.ts  no-OpenAI source/data ingestion and curation-candidate demo
     recommendations.ts deterministic recommendation entrypoint backed by storage adapter
     smoke.ts        optional traced runtime smoke test
     types.ts        P0 request/response/domain/storage object types
     credit-loan/    credit-loan probe, scenario, and route seeds
+    curation/       queue primitive that stores candidates and fires review flow events
+    ingestion/      source/data ingestion entrypoints, samples, and Weave tracing wrapper
     storage/        storage interface, local memory/json fallback, Redis Iris adapter boundary
 ```
 
