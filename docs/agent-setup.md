@@ -100,6 +100,20 @@ Copilot guidance is doc-based here; MCP is not prewired for Copilot in this repo
 I also set up a Pi/Realm project-local skill for this repo only.
 It lives in your local Realm project state and is **not** committed to git or pushed to GitHub.
 
+## Runtime sandbox agent
+Separate from the coding-assistant wiring above, the repo ships a minimal
+runtime agent in `agents/main_agent/` built on the OpenAI Agents SDK
+(`@openai/agents`) Sandbox Agent pattern:
+<https://developers.openai.com/api/docs/guides/agents/sandboxes>.
+
+```bash
+npm run main:agent -- "list the files in the workspace and summarize the task"
+```
+
+It needs `OPENAI_API_KEY` (and the usual `WANDB_*` vars for Weave tracing), and
+the local sandbox client requires a Unix-like host (macOS or Linux). See
+`agents/main_agent/README.md` for details.
+
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`.
 - If an agent does not pick up a new config file, restart it from the repo root.
