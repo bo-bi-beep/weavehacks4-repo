@@ -19,15 +19,36 @@ export function getOpenAIModel(): string {
 }
 
 let initialized = false;
+let weaveEnabled = false;
 
-export async function initWeave(): Promise<void> {
+/** Whether Weave tracing was successfully initialized in this process. */
+export function isWeaveEnabled(): boolean {
+  return weaveEnabled;
+}
+
+/**
+ * Initializes Weave tracing when `WANDB_API_KEY` is set. If the key is absent,
+ * tracing is skipped with a warning instead of throwing, so flows can still run
+ * without a W&B account. Returns whether tracing is enabled.
+ */
+export async function initWeave(): Promise<boolean> {
   if (initialized) {
-    return;
+    return weaveEnabled;
+  }
+  initialized = true;
+
+  const apiKey = process.env.WANDB_API_KEY?.trim();
+  if (!apiKey) {
+    console.warn(
+      "[weave] WANDB_API_KEY not set — skipping Weave tracing. " +
+        "Add it to .env to enable traces (get one at https://wandb.ai/authorize).",
+    );
+    return false;
   }
 
-  requireEnv("WANDB_API_KEY");
   await weave.init(getWeaveProjectName());
-  initialized = true;
+  weaveEnabled = true;
+  return true;
 }
 
 export { weave };

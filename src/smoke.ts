@@ -15,8 +15,12 @@ const scoreIdea = weave.op(function scoreIdea(idea: string) {
 
 const idea = process.argv.slice(2).join(" ").trim() || "An agent with visible traces and a crisp demo loop.";
 
-await initWeave();
+const tracing = await initWeave();
 
-console.log(`Tracing to W&B Weave project: ${getWeaveProjectName()}`);
+console.log(
+  tracing
+    ? `Tracing to W&B Weave project: ${getWeaveProjectName()}`
+    : "Weave tracing disabled (set WANDB_API_KEY to enable).",
+);
 console.log();
 console.log(JSON.stringify(scoreIdea(idea), null, 2));
