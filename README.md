@@ -6,7 +6,7 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - TypeScript/Node starter with Weave helpers in `src/lib/weave.ts`
 - OpenAI + Weave example path in `src/index.ts`
 - Weave smoke test in `src/smoke.ts`
-- Minimal OpenAI Sandbox Agent in `agents/main_agent/` (`npm run main:agent`)
+- Minimal OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` (`npm run main:agent`)
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
 - Agent setup docs in `docs/agent-setup.md`
@@ -27,7 +27,8 @@ Fill in:
 - `WANDB_ENTITY`
 - `WANDB_PROJECT`
 - `OPENAI_API_KEY`
-- optional: `OPENAI_MODEL`
+- `BL_API_KEY` / `BL_WORKSPACE` (Blaxel sandbox — needed for `npm run main:agent`)
+- optional: `OPENAI_MODEL`, `BLAXEL_SANDBOX_IMAGE`, `BLAXEL_SANDBOX_MEMORY`, `BLAXEL_SANDBOX_REGION`
 
 ## Handy commands
 - `npm run typecheck`
