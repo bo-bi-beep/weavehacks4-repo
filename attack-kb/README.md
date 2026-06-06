@@ -41,7 +41,17 @@ ATTACK_KB_RECOMMENDER_MODEL=gpt-4.1
 
 ## Sandbox agents
 
-Live Attack KB agents mirror the repo's existing Blaxel sandbox pattern from `agents/sub_agents/` through `attack-kb/src/sandbox.ts`.
+Live Attack KB agents mirror the repo's existing Blaxel sandbox pattern from `agents/sub_agents/` through `attack-kb/src/sandbox.ts`, while keeping Attack KB role files under `agents/attack_kb/`.
+
+Each role has its own folder with `README.md`, `instructions.md`, and `task.md`:
+
+- `agents/attack_kb/source-discovery/`
+- `agents/attack_kb/source-retrieval/`
+- `agents/attack_kb/credibility-triage/`
+- `agents/attack_kb/kb-curator/`
+- `agents/attack_kb/recommendation-builder/`
+
+Runtime notes:
 
 - deterministic demos/evals do not launch Blaxel;
 - `npm run attack-kb:sandbox-smoke` prints the sandbox config and missing live-launch env vars without making model calls;

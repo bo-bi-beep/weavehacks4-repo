@@ -34,6 +34,7 @@ console.log(
         model: spec.model,
         provider: spec.provider,
         service: spec.service,
+        agentFiles: spec.agentFiles,
         sandbox: spec.sandbox,
         safetyBoundary: spec.safetyBoundary,
         createAgentInput: {
