@@ -5,6 +5,7 @@ Each of the 8 categories produces a score in [0.0, 1.0].
 The weighted total determines approve (>= THRESHOLD) or deny (< THRESHOLD).
 Weights sum to exactly 1.0.
 """
+import weave
 
 WEIGHTS: dict[str, float] = {
     "credit":            0.25,
@@ -175,6 +176,7 @@ def _score_fraud(fraud_flags: int) -> float:
 # Public entry point
 # ---------------------------------------------------------------------------
 
+@weave.op()
 def compute_score(
     credit_score: int,
     num_late_payments: int,
