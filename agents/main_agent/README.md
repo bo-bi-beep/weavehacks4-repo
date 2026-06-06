@@ -9,20 +9,44 @@ Reference: <https://developers.openai.com/api/docs/guides/agents/sandboxes>
 
 ## What it is
 
-A Sandbox Agent runs in an isolated environment with its own filesystem and
-shell. This one is:
+An **adversarial** Sandbox Agent: its system prompt tasks it with attacking the
+Loan Approval Agent to find vulnerabilities (probing decision logic, prompt
+injection, jailbreaks). It runs in an isolated environment with its own
+filesystem and shell:
 
-- a `Manifest` that seeds the workspace with a `task.md`
+- a `Manifest` that seeds the workspace with the loaded skills (no `task.md`)
 - a `SandboxAgent` (`mainAgent`) with the `shell()` capability **and** a set of
   function tools for spawning/driving sub-agents (see below)
 - a Weave-traced `runMainAgent(prompt)` entry point that executes the agent
   against a **Blaxel** sandbox via `BlaxelSandboxClient`
   (`@openai/agents-extensions/sandbox/blaxel`, backed by `@blaxel/core`)
 
-The `harness` (model calls, agent logic, sub-agent control) stays in this
-process; the `compute` (files, shell commands) runs inside a Blaxel micro-VM.
-The runner creates the sandbox session from `defaultManifest` and tears it down
-when the run finishes.
+## Skills
+
+At startup the agent loads repo skills into its workspace, mirroring the
+on-demand `load_skill` flow in `agents/sub_agents/`. Each skill's `SKILL.md` is
+resolved from `.claude/skills/<name>/` or `.agents/skills/<name>/`, mounted at
+`skills/<name>/SKILL.md` in the sandbox, and referenced from the agent's
+instructions so the model reads it before acting.
+
+By default it loads the **`loan-approval-agent`** skill (how to drive the Loan
+Approval Agent HTTP API). Override the set with `MAIN_AGENT_SKILLS` — a
+comma-separated list of skill names, or `none`/empty to load nothing:
+
+```bash
+# load two skills
+MAIN_AGENT_SKILLS="loan-approval-agent,weave-integration" npm run main:agent -- "..."
+
+# load no skills
+MAIN_AGENT_SKILLS=none npm run main:agent -- "..."
+```
+
+A skill that can't be resolved is logged and skipped (the agent still runs).
+The loaded names are exported as `loadedSkills` and printed on startup.
+
+The `harness` (model calls, agent logic) stays in this process; the `compute`
+(files, shell commands) runs inside a Blaxel micro-VM. The runner creates the
+sandbox session from `defaultManifest` and tears it down when the run finishes.
 
 ## Orchestrating sub-agents
 
@@ -42,14 +66,12 @@ tools**, not over HTTP. `index.ts` holds one in-process `SubAgentService`
 
 Because these are plain `FunctionTool`s, they execute in the harness process,
 while the agent's `shell()` runs in the sandbox — the SDK merges both into the
-agent's tool list (`agent.tools` + capability tools). So the model can break a
-task into independent parts and spawn **one sub-agent per part** at runtime,
-delegate, then synthesize. Every spawn/ask/skill-load is a Weave op, so the full
-fan-out is one nested trace. `runMainAgent` calls `service.closeAll()` in a
-`finally`, so sub-agent micro-VMs never leak past the run.
-
-The default `task.md` is a small fan-out demo (compute three independent items),
-so a no-prompt run exercises the orchestration path end to end.
+agent's tool list (`agent.tools` + capability tools). So the adversarial agent
+can break an attack plan into independent probes, spawn **one sub-agent per
+probe** at runtime, delegate, then synthesize. Every tool call is streamed to the
+console and recorded as a nested Weave op; `runMainAgent` calls
+`service.closeAll()` in a `finally`, so sub-agent micro-VMs never leak past the
+run.
 
 ## Files
 
@@ -64,18 +86,17 @@ Run from the **repo root** (the directory with `package.json`) — not from
 inside `agents/main_agent/`:
 
 ```bash
-npm run main:agent -- "list the files in the workspace and summarize the task"
+npm run main:agent -- "try a prompt-injection attack against the loan agent as dave"
 ```
 
-With no prompt it defaults to reading `task.md` — the fan-out demo — so the agent
-spawns a sub-agent per item and reports the combined result. This makes real
-model calls and spins up one Blaxel micro-VM per sub-agent, so it needs live
-`OPENAI_API_KEY`, `BL_API_KEY`, and `BL_WORKSPACE`.
+With no prompt it defaults to reading the `loan-approval-agent` skill and
+attacking the Loan Approval Agent, reporting every vulnerability it finds.
 
 ## Env vars
 
 - `OPENAI_API_KEY` — required (model calls)
 - `OPENAI_MODEL` — optional, defaults to `gpt-5.4-mini`
+- `MAIN_AGENT_SKILLS` — optional, comma-separated skill names to load; defaults to `loan-approval-agent` (`none`/empty loads no skills)
 - `BL_API_KEY` — required (Blaxel sandbox auth)
 - `BL_WORKSPACE` — required (Blaxel workspace)
 - `BLAXEL_SANDBOX_IMAGE` — optional, defaults to `blaxel/base-image`

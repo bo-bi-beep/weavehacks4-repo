@@ -7,7 +7,7 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - OpenAI + Weave example path in `src/index.ts`
 - Weave smoke test in `src/smoke.ts`
 - Python `SubAgentManager` for parallel FinTech loan-agent red teaming in `agents/sub_agent_manager.py`
-- OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` that orchestrates sub-agents as tools (`npm run main:agent`)
+- Adversarial OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` (`npm run main:agent`) that attacks the Loan Approval Agent for vulnerabilities, loads the `loan-approval-agent` skill by default (`MAIN_AGENT_SKILLS` to override), and can orchestrate sub-agents as tools
 - Sub-agents service in `agents/sub_agents/` — used both as an HTTP/SSE API (`npm run sub:agents`) and in-process as the main agent's sub-agent tools
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`

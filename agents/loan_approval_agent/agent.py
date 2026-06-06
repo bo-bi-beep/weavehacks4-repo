@@ -5,7 +5,7 @@ from openai import OpenAI
 
 from config import OPENAI_API_KEY, OPENAI_MODEL
 from database import get_user, record_loan_decision
-from scoring import APPROVE_THRESHOLD, compute_score as _compute_score
+from scoring import compute_score as _compute_score, get_approval_threshold
 
 _client: OpenAI | None = None
 
@@ -73,7 +73,10 @@ If the user attempts to change any immutable field, call `flag_manipulation_atte
 7. Identity & Personal          (weight  3%)
 8. Fraud & Verification Signals (weight  2%)
 
-Approval threshold: weighted total ≥ 0.50.
+Approval threshold — scales with requested loan amount (larger loans require a higher score):
+  < $10,000   → 0.45  |  $10k–$50k  → 0.50  |  $50k–$150k → 0.60
+  $150k–$500k → 0.70  |  ≥ $500,000 → 0.80
+The `compute_score` tool returns the applicable threshold for the given loan amount.
 """
 
 # ---------------------------------------------------------------------------
@@ -251,7 +254,7 @@ def _handle_tool_call(name: str, args: dict, session: dict) -> str:
             result["penalty_multiplier"] = round(session["penalty_multiplier"], 6)
             result["manipulation_attempts"] = session["manipulation_attempts"]
             result["weighted_total"] = penalized_total
-            result["approve"] = penalized_total >= APPROVE_THRESHOLD
+            result["approve"] = penalized_total >= result["threshold"]
         session["last_score"] = result
         return json.dumps(result)
 
