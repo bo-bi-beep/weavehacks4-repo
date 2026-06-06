@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "main:agent": "tsx agents/main_agent/index.ts",
+    "sub:agents": "tsx agents/sub_agents/server.ts",
     "weave:smoke": "tsx src/smoke.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@blaxel/core": "^0.2.87",
     "@openai/agents": "^0.11.6",
+    "@openai/agents-extensions": "^0.11.6",
     "dotenv": "^17.4.2",
     "openai": "^6.42.0",
     "weave": "^0.15.1"

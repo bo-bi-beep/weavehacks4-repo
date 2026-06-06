@@ -22,7 +22,10 @@ export WANDB_API_KEY=your-wandb-api-key
 export WANDB_ENTITY=your-wandb-entity
 export WANDB_PROJECT=weavehacks4-your-idea
 export OPENAI_API_KEY=your-openai-api-key
-export OPENAI_MODEL=gpt-4.1-mini
+export OPENAI_MODEL=gpt-5.4-mini
+# Blaxel sandbox (compute backend for agents/main_agent)
+export BL_API_KEY=your-blaxel-api-key
+export BL_WORKSPACE=your-blaxel-workspace
 ```
 
 ## Claude Code
@@ -101,18 +104,48 @@ I also set up a Pi/Realm project-local skill for this repo only.
 It lives in your local Realm project state and is **not** committed to git or pushed to GitHub.
 
 ## Runtime sandbox agent
-Separate from the coding-assistant wiring above, the repo ships a minimal
+Separate from the coding-assistant wiring above, the repo ships an adversarial
 runtime agent in `agents/main_agent/` built on the OpenAI Agents SDK
 (`@openai/agents`) Sandbox Agent pattern:
-<https://developers.openai.com/api/docs/guides/agents/sandboxes>.
+<https://developers.openai.com/api/docs/guides/agents/sandboxes>. Its system
+prompt tasks it with attacking the Loan Approval Agent to find vulnerabilities.
 
 ```bash
-npm run main:agent -- "list the files in the workspace and summarize the task"
+npm run main:agent -- "try a prompt-injection attack against the loan agent as dave"
 ```
 
-It needs `OPENAI_API_KEY` (and the usual `WANDB_*` vars for Weave tracing), and
-the local sandbox client requires a Unix-like host (macOS or Linux). See
-`agents/main_agent/README.md` for details.
+The sandbox compute runs on **Blaxel** via `BlaxelSandboxClient`
+(`@openai/agents-extensions/sandbox/blaxel`, backed by `@blaxel/core`) instead
+of a local Unix process, so it works from any host. It needs `OPENAI_API_KEY`,
+`BL_API_KEY`, and `BL_WORKSPACE` (plus the usual `WANDB_*` vars for Weave
+tracing). See `agents/main_agent/README.md` for the optional sandbox tuning
+vars and details.
+
+At startup it also loads repo skills into the sandbox workspace (resolved from
+`.claude/skills/` or `.agents/skills/`, mounted at `skills/<name>/SKILL.md`),
+defaulting to the `loan-approval-agent` skill. Override the set with
+`MAIN_AGENT_SKILLS` (comma-separated; `none`/empty to disable).
+
+## Sub-agents service
+The repo also ships a multi-agent **service** in `agents/sub_agents/` built on
+the same Sandbox Agent pattern. It exposes an HTTP + SSE API for managing many
+addressable agents:
+
+- `POST /agents` — **create_agent**
+- `POST /agents/:id/messages` — **send_message** (streamed over SSE)
+- `POST /agents/:id/skills` — **load_skill** (mounts a repo `SKILL.md`)
+- `POST /agents/:id/terminal` — **terminal** (runs a shell command in the agent's sandbox)
+
+```bash
+npm run sub:agents   # listens on PORT (default 3000)
+```
+
+Like `main_agent`, this service runs each agent on its own **Blaxel** micro-VM
+(via the shared `createBlaxelSandboxClient` in `src/lib/blaxel.ts`), so it needs
+`OPENAI_API_KEY`, `BL_API_KEY`, and `BL_WORKSPACE` (plus the usual `WANDB_*` vars
+for Weave tracing) and works from any host. `BLAXEL_SANDBOX_NAME`, if set, is
+used as a per-agent name prefix. See `agents/sub_agents/README.md` for the full
+API and curl examples.
 
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`.

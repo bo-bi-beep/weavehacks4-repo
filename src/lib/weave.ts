@@ -1,3 +1,4 @@
+import { setTraceProcessors } from "@openai/agents";
 import * as weave from "weave";
 
 export function getWeaveProjectName(): string {
@@ -15,7 +16,7 @@ export function requireEnv(name: string): string {
 }
 
 export function getOpenAIModel(): string {
-  return process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini";
+  return process.env.OPENAI_MODEL?.trim() || "gpt-5.4-mini";
 }
 
 let initialized = false;
@@ -47,6 +48,15 @@ export async function initWeave(): Promise<boolean> {
   }
 
   await weave.init(getWeaveProjectName());
+
+  // Bridge the OpenAI Agents SDK's spans into Weave so every agent run, LLM
+  // generation, and tool call shows up as a nested span — including each
+  // `sandbox.exec` shell command run in the Blaxel/Unix sandbox (the SDK wraps
+  // every `exec_command` in a trace span). `setTraceProcessors` makes Weave the
+  // sole destination, replacing the SDK default that would otherwise export
+  // traces to OpenAI's backend.
+  setTraceProcessors([weave.createOpenAIAgentsTracingProcessor()]);
+
   weaveEnabled = true;
   return true;
 }
