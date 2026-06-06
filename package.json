@@ -14,6 +14,8 @@
     "attack-kb:curation-ui": "tsx attack-kb/src/curation/server.ts",
     "attack-kb:curation-smoke": "tsx attack-kb/src/curation/smoke.ts",
     "attack-kb:evals": "tsx attack-kb/evals/run.ts",
+    "attack-kb:demo": "tsx attack-kb/src/demo/server.ts",
+    "attack-kb:demo-smoke": "tsx attack-kb/src/demo/smoke.ts",
     "attack-kb:smoke": "tsx attack-kb/src/smoke.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json"
