@@ -135,19 +135,100 @@ export const mainAgent = new SandboxAgent({
 /** Names of the skills mounted into {@link mainAgent}'s workspace. */
 export const loadedSkills: string[] = skills.map((skill) => skill.name);
 
+/** Truncate long tool output so console logs stay readable. */
+function truncate(text: string, max = 800): string {
+  return text.length > max ? `${text.slice(0, max)}… (${text.length} chars)` : text;
+}
+
+/**
+ * Records a single tool call as a Weave op so each shows up as its own nested
+ * span under `runMainAgent`. The input captures the tool name and arguments —
+ * for the shell tool (`exec_command`) that's the actual shell command — and the
+ * return value is the tool's output. This is recorded explicitly because the
+ * Agents SDK's own tool/`sandbox.exec` spans don't reliably reach Weave from a
+ * sandbox run, so without this the trace shows only the LLM turns.
+ */
+const recordToolCall = weave.op(async function toolCall(call: {
+  tool: string;
+  arguments: unknown;
+  output: string;
+}) {
+  return call.output;
+});
+
+/** Pull the tool name and (parsed) arguments out of a tool_call_item. */
+function describeToolCall(item: any): { tool: string; args: unknown } {
+  const raw = item?.rawItem ?? {};
+  const tool: string = raw.name ?? item?.type ?? "tool";
+  let args: unknown = raw.arguments;
+  if (typeof args === "string") {
+    try {
+      args = JSON.parse(args);
+    } catch {
+      // Leave non-JSON arguments as the raw string.
+    }
+  }
+  return { tool, args };
+}
+
 // Weave-traced sandbox run so the full run is visible in the demo trace. The
 // compute runs on a Blaxel sandbox (instant-launch micro-VM) instead of a local
 // Unix process; the runner creates the session from `defaultManifest` and tears
 // it down when the run finishes. `weave.op` only records a span once Weave has
 // been initialized, which `runMainAgent` below guarantees before calling this.
+//
+// The run is streamed so each intermediate tool call (and its output) can be
+// printed to the console and recorded as a nested Weave op — the SDK's own
+// tool/shell spans don't surface in Weave from a sandbox run, so without this
+// the trace would show only the LLM request and final response.
 const runMainAgentTraced = weave.op(async function runMainAgent(prompt: string) {
-  const result = await run(mainAgent, prompt, {
-    sandbox: {
-      client: createBlaxelSandboxClient(),
-    },
+  const stream = await run(mainAgent, prompt, {
+    sandbox: { client: createBlaxelSandboxClient() },
+    stream: true,
   });
 
-  return result.finalOutput ?? "";
+  // Pair each tool call with its output by callId so we record one span (with
+  // both the command and its result) per invocation.
+  const pending = new Map<string, { tool: string; args: unknown }>();
+
+  for await (const event of stream as AsyncIterable<any>) {
+    if (event.type !== "run_item_stream_event") continue;
+    const item = event.item;
+
+    if (item?.type === "tool_call_item") {
+      const { tool, args } = describeToolCall(item);
+      const callId: string = item.rawItem?.callId ?? item.rawItem?.id ?? "";
+      pending.set(callId, { tool, args });
+      const cmd =
+        tool === "exec_command" && args && typeof args === "object"
+          ? (args as { cmd?: string }).cmd
+          : undefined;
+      console.log(`  ↳ ${tool}${cmd ? `: ${cmd}` : `(${JSON.stringify(args)})`}`);
+    } else if (item?.type === "tool_call_output_item") {
+      const callId: string = item.rawItem?.callId ?? "";
+      const call = pending.get(callId) ?? { tool: "tool", args: undefined };
+      pending.delete(callId);
+      const output =
+        typeof item.output === "string"
+          ? item.output
+          : JSON.stringify(item.output ?? "");
+      console.log(`  ↳ ${call.tool} → ${truncate(output)}`);
+      await recordToolCall({ tool: call.tool, arguments: call.args, output });
+    }
+  }
+
+  await stream.completed;
+
+  // Record any tool calls that never produced a matching output item.
+  for (const [, call] of pending) {
+    await recordToolCall({
+      tool: call.tool,
+      arguments: call.args,
+      output: "(no output captured)",
+    });
+  }
+
+  return (stream.finalOutput as string | undefined) ?? "";
 });
 
 // Public entry point for the main agent. Initializes Weave first so the run is
