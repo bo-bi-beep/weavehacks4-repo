@@ -104,10 +104,9 @@ I also set up a Pi/Realm project-local skill for this repo only.
 It lives in your local Realm project state and is **not** committed to git or pushed to GitHub.
 
 ## Runtime sandbox agent
-Separate from the coding-assistant wiring above, the repo ships a minimal
-runtime agent in `agents/main_agent/` built on the OpenAI Agents SDK
-(`@openai/agents`) Sandbox Agent pattern:
-<https://developers.openai.com/api/docs/guides/agents/sandboxes>.
+Separate from the coding-assistant wiring above, the repo ships a runtime agent
+in `agents/main_agent/` built on the OpenAI Agents SDK (`@openai/agents`) Sandbox
+Agent pattern: <https://developers.openai.com/api/docs/guides/agents/sandboxes>.
 
 ```bash
 npm run main:agent -- "list the files in the workspace and summarize the task"
@@ -119,6 +118,16 @@ of a local Unix process, so it works from any host. It needs `OPENAI_API_KEY`,
 `BL_API_KEY`, and `BL_WORKSPACE` (plus the usual `WANDB_*` vars for Weave
 tracing). See `agents/main_agent/README.md` for the optional sandbox tuning
 vars and details.
+
+The main agent is also an **orchestrator**: it holds an in-process
+`SubAgentService` (the same registry the sub-agents service below exposes over
+HTTP) and surfaces it to the model as function tools — `spawn_sub_agent`,
+`ask_sub_agent`, `load_skill`, `run_in_sub_agent`, `list_sub_agents`, and
+`stop_sub_agent`. So it can break a task into independent parts and spawn one
+sandboxed sub-agent per part at runtime, delegate, then synthesize. The tools run
+in the harness process while the agent's `shell()` runs in its sandbox; spawned
+sub-agent micro-VMs are torn down when the run ends. With no prompt, the default
+`task.md` is a small fan-out demo that exercises this path.
 
 ## Sub-agents service
 The repo also ships a multi-agent **service** in `agents/sub_agents/` built on

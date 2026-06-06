@@ -12,30 +12,55 @@ import {
   requireEnv,
   weave,
 } from "../../src/lib/weave.js";
+import { SubAgentService } from "../sub_agents/service.js";
+import { createSubAgentTools } from "./sub_agent_tools.js";
+
+// Registry of sandboxed sub-agents the main agent can spawn at runtime. It runs
+// in this (harness) process and gives each sub-agent its own Blaxel micro-VM —
+// the same service `agents/sub_agents` exposes over HTTP. Exposed to the model
+// as function tools below, so the main agent acts as an orchestrator that can
+// fan a task out across a dynamic number of sub-agents.
+const subAgents = new SubAgentService();
 
 // Seed the sandbox workspace. The agent reads, writes, and runs shell commands
-// against these files inside an isolated Unix-like environment.
+// against these files inside an isolated Unix-like environment. The default
+// task is a small fan-out demo: independent items the agent can hand to one
+// sub-agent each, then synthesize.
 const manifest = new Manifest({
   entries: {
     "task.md": file({
       content:
         "# Task\n\n" +
-        "Calculate 1 + 25 and report the result.\n",
+        "You are an orchestrator. Spawn one sub-agent per item below, ask each " +
+        "to compute just its own result, then report all results together.\n\n" +
+        "- 1 + 25\n" +
+        "- 7 * 6\n" +
+        "- the number of letters in the word \"weave\"\n",
     }),
   },
 });
 
-// The minimalistic Sandbox Agent: a model with shell access to an isolated
-// workspace. Exported so sub-agents / orchestration code can reuse it.
+// The Sandbox Agent: a model with shell access to an isolated workspace, plus
+// tools to spawn and delegate to sub-agents. Exported so orchestration code can
+// reuse it. Function tools (sub-agent control) run in this process; the shell
+// capability runs in the sandbox — the SDK merges both into the agent's tools.
 // See https://developers.openai.com/api/docs/guides/agents/sandboxes
 export const mainAgent = new SandboxAgent({
   name: "Main Agent",
   model: getOpenAIModel(),
   instructions:
-    "You are the main agent. Inspect the sandbox workspace with the shell " +
-    "before answering. Keep responses concise and cite any files you relied on.",
+    "You are the main orchestrator agent. You have your own sandbox workspace " +
+    "(inspect it with the shell) plus tools to spawn and delegate to sandboxed " +
+    "sub-agents.\n\n" +
+    "When a task has independent parts, break it down and spawn one sub-agent " +
+    "per part with `spawn_sub_agent` — spawn as many as the work needs. " +
+    "Delegate each part with `ask_sub_agent`, optionally preloading repo skills " +
+    "or running shell commands inside a sub-agent's sandbox. Collect the " +
+    "sub-agents' replies and synthesize a single final answer. Keep responses " +
+    "concise and cite the files or sub-agents you relied on.",
   defaultManifest: manifest,
   capabilities: [shell()],
+  tools: createSubAgentTools(subAgents),
 });
 
 // Weave-traced sandbox run so the full run is visible in the demo trace. The
@@ -44,13 +69,18 @@ export const mainAgent = new SandboxAgent({
 // it down when the run finishes. `weave.op` only records a span once Weave has
 // been initialized, which `runMainAgent` below guarantees before calling this.
 const runMainAgentTraced = weave.op(async function runMainAgent(prompt: string) {
-  const result = await run(mainAgent, prompt, {
-    sandbox: {
-      client: createBlaxelSandboxClient(),
-    },
-  });
+  try {
+    const result = await run(mainAgent, prompt, {
+      sandbox: {
+        client: createBlaxelSandboxClient(),
+      },
+    });
 
-  return result.finalOutput ?? "";
+    return result.finalOutput ?? "";
+  } finally {
+    // Tear down any sub-agent micro-VMs the run spawned so none leak past it.
+    await subAgents.closeAll();
+  }
 });
 
 // Public entry point for the main agent. Initializes Weave first so the run is
