@@ -7,6 +7,7 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - OpenAI + Weave example path in `src/index.ts`
 - Weave smoke test in `src/smoke.ts`
 - Minimal OpenAI Sandbox Agent in `agents/main_agent/` (`npm run main:agent`)
+- Sub-agents HTTP/SSE service in `agents/sub_agents/` (`npm run sub:agents`)
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
 - Agent setup docs in `docs/agent-setup.md`
@@ -34,6 +35,7 @@ Fill in:
 - `npm run weave:smoke -- "idea"`
 - `npm run dev -- "problem statement"`
 - `npm run main:agent -- "task for the sandbox agent"`
+- `npm run sub:agents` (starts the sub-agents service on `PORT`, default `3000`)
 
 ## Agent setup
 See `docs/agent-setup.md`.
@@ -52,6 +54,7 @@ Repo includes:
 ```text
 agents/   agent logic, prompts, tool wiring
   main_agent/  minimal OpenAI Sandbox Agent (Weave-traced)
+  sub_agents/  HTTP/SSE service: create_agent, send_message, load_skill, terminal
 evals/    datasets and evaluation scripts
 scripts/  setup/dev helpers
 docs/     hackathon notes, submission copy, demo plan

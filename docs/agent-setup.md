@@ -114,6 +114,24 @@ It needs `OPENAI_API_KEY` (and the usual `WANDB_*` vars for Weave tracing), and
 the local sandbox client requires a Unix-like host (macOS or Linux). See
 `agents/main_agent/README.md` for details.
 
+## Sub-agents service
+The repo also ships a multi-agent **service** in `agents/sub_agents/` built on
+the same Sandbox Agent pattern. It exposes an HTTP + SSE API for managing many
+addressable agents:
+
+- `POST /agents` — **create_agent**
+- `POST /agents/:id/messages` — **send_message** (streamed over SSE)
+- `POST /agents/:id/skills` — **load_skill** (mounts a repo `SKILL.md`)
+- `POST /agents/:id/terminal` — **terminal** (runs a shell command in the agent's sandbox)
+
+```bash
+npm run sub:agents   # listens on PORT (default 3000)
+```
+
+Same env requirements as `main_agent` (`OPENAI_API_KEY`, optional `WANDB_*`,
+Unix-like host). See `agents/sub_agents/README.md` for the full API and curl
+examples.
+
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`.
 - If an agent does not pick up a new config file, restart it from the repo root.
