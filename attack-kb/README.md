@@ -51,7 +51,21 @@ npm run typecheck
 npm run build
 ```
 
-`attack-kb:config` validates configuration without making a model call. `attack-kb:probe` returns deterministic probing recommendations without calling an LLM. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
+`attack-kb:config` validates configuration without making a model call. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime and will consume OpenAI API usage.
+
+No-API rich-profile demo:
+
+```bash
+npm run attack-kb:probe -- --rich-credit-loan
+```
+
+Custom observed profile example:
+
+```bash
+npm run attack-kb:probe -- '{"domain":"credit_loan","observedDecisionFactors":[{"factorRef":"factor-credit-score","evidence":"Synthetic variants changed the target rationale.","confidence":0.8},{"factorRef":"factor-income","evidence":"Target requested income in a fictional evaluation.","confidence":0.75}]}'
+```
+
+The rich-profile path uses only synthetic defensive testing language. A profile with no `observedDecisionFactors` stays in `phase: "probing"`; once the main agent supplies observed credit-loan factors, Attack KB returns `phase: "attack"` recommendations composed from `DomainDecisionFactor`, `DomainScenario`, `BusinessAttackRoute`, and system-level safety patterns.
 
 ## Current structure
 
@@ -68,7 +82,14 @@ attack-kb/
     recommendations.ts deterministic recommendation entrypoint
     smoke.ts        optional traced runtime smoke test
     types.ts        P0 request/response/domain types
-    credit-loan/    credit-loan probe seeds
+    credit-loan/    credit-loan probe, scenario, and route seeds
 ```
 
-Future issues will add composed rich-profile attack routes, Redis Iris storage, curation UI, and evals.
+Current deterministic KB entities include:
+
+- `DomainDecisionFactor` — likely or observed credit-loan decision variables such as credit score, income, existing loans, and previous fraud history.
+- `DomainScenario` — fictional credit-loan profiles used to test observed factors safely.
+- `BusinessAttackRoute` — defensive business-route checks that compose financial factors with system-level patterns.
+- `AttackRecommendation` — output DTO. Probing recommendations reference `ReconProbe`; rich-profile attack recommendations include `composition`, `businessAttackRouteRefs`, `domainScenarioRefs`, and `systemPatternRefs`.
+
+Future issues will add Redis Iris storage, curation UI, and evals.

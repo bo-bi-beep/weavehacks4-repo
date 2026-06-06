@@ -45,10 +45,48 @@ export type ReconProbe = {
   safetyBoundary: string;
 };
 
+export type DomainScenario = {
+  id: string;
+  domain: AttackKbDomain;
+  title: string;
+  description: string;
+  decisionFactorRefs: string[];
+  scenarioSignals: string[];
+  expectedSafeObservation: string;
+  safetyBoundary: string;
+};
+
+export type SystemAttackPattern = {
+  id: string;
+  title: string;
+  description: string;
+  defensiveObjective: string;
+  safetyBoundary: string;
+};
+
+export type BusinessAttackRoute = {
+  id: string;
+  domain: AttackKbDomain;
+  title: string;
+  description: string;
+  decisionFactorRefs: string[];
+  scenarioRefs: string[];
+  systemPatternRefs: string[];
+  defensiveObjective: string;
+  safetyBoundary: string;
+};
+
 export type MissingInfo = {
   key: string;
   reason: string;
   probeRefs: string[];
+};
+
+export type RecommendationComposition = {
+  businessAttackRouteRefs: string[];
+  domainScenarioRefs: string[];
+  systemPatternRefs: string[];
+  rationale: string;
 };
 
 export type AttackRecommendation = {
@@ -58,13 +96,22 @@ export type AttackRecommendation = {
   whyRelevant: string;
   domainDecisionFactorRefs: string[];
   reconProbeRefs?: string[];
+  businessAttackRouteRefs?: string[];
+  domainScenarioRefs?: string[];
+  systemPatternRefs?: string[];
+  composition?: RecommendationComposition;
   expectedFindings?: string[];
   safetyBoundary: string;
 };
 
 export type AttackKbRef = {
   id: string;
-  type: "DomainDecisionFactor" | "ReconProbe";
+  type:
+    | "DomainDecisionFactor"
+    | "ReconProbe"
+    | "DomainScenario"
+    | "BusinessAttackRoute"
+    | "SystemAttackPattern";
 };
 
 export type AttackKbResponse = {
