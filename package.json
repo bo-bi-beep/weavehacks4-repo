@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "main:agent": "tsx agents/main_agent/index.ts",
     "weave:smoke": "tsx src/smoke.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@openai/agents": "^0.11.6",
     "dotenv": "^17.4.2",
     "openai": "^6.42.0",
     "weave": "^0.15.1"
