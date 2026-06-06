@@ -14,6 +14,15 @@ import {
   requireEnv,
   weave,
 } from "../../src/lib/weave.js";
+import { SubAgentService } from "../sub_agents/service.js";
+import { createSubAgentTools } from "./sub_agent_tools.js";
+
+// Registry of sandboxed sub-agents the main agent can spawn at runtime. It runs
+// in this (harness) process and gives each sub-agent its own Blaxel micro-VM —
+// the same service `agents/sub_agents` exposes over HTTP. Exposed to the model
+// as function tools below, so the main agent acts as an orchestrator that can
+// fan a task out across a dynamic number of sub-agents.
+const subAgents = new SubAgentService();
 
 // Repo root, used to resolve repo skills (`<dir>/<name>/SKILL.md`).
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../..");
@@ -121,15 +130,26 @@ const skillInstructions = skills.length
     skills.map((skill) => `- "${skill.name}" — \`${skill.sandboxPath}\``).join("\n")
   : "";
 
-// The minimalistic Sandbox Agent: a model with shell access to an isolated
-// workspace. Exported so sub-agents / orchestration code can reuse it.
+const orchestrationInstructions =
+  "\n\nYou also have tools to spawn and delegate to sandboxed sub-agents. " +
+  "When an attack plan has independent probes, break it down and spawn one " +
+  "sub-agent per probe with `spawn_sub_agent`; preload relevant skills such as " +
+  "`loan-approval-agent` when useful. Delegate each focused attack with " +
+  "`ask_sub_agent`, optionally run shell commands in a sub-agent sandbox, then " +
+  "collect the sub-agents' findings and synthesize one concise report.";
+
+// The Sandbox Agent: a model with shell access to an isolated workspace, plus
+// tools to spawn and delegate to sub-agents. Exported so orchestration code can
+// reuse it. Function tools (sub-agent control) run in this process; the shell
+// capability runs in the sandbox — the SDK merges both into the agent's tools.
 // See https://developers.openai.com/api/docs/guides/agents/sandboxes
 export const mainAgent = new SandboxAgent({
   name: "Main Agent",
   model: getOpenAIModel(),
-  instructions: baseInstructions + skillInstructions,
+  instructions: baseInstructions + skillInstructions + orchestrationInstructions,
   defaultManifest: manifest,
   capabilities: [shell()],
+  tools: createSubAgentTools(subAgents),
 });
 
 /** Names of the skills mounted into {@link mainAgent}'s workspace. */
@@ -182,53 +202,58 @@ function describeToolCall(item: any): { tool: string; args: unknown } {
 // tool/shell spans don't surface in Weave from a sandbox run, so without this
 // the trace would show only the LLM request and final response.
 const runMainAgentTraced = weave.op(async function runMainAgent(prompt: string) {
-  const stream = await run(mainAgent, prompt, {
-    sandbox: { client: createBlaxelSandboxClient() },
-    stream: true,
-  });
-
-  // Pair each tool call with its output by callId so we record one span (with
-  // both the command and its result) per invocation.
-  const pending = new Map<string, { tool: string; args: unknown }>();
-
-  for await (const event of stream as AsyncIterable<any>) {
-    if (event.type !== "run_item_stream_event") continue;
-    const item = event.item;
-
-    if (item?.type === "tool_call_item") {
-      const { tool, args } = describeToolCall(item);
-      const callId: string = item.rawItem?.callId ?? item.rawItem?.id ?? "";
-      pending.set(callId, { tool, args });
-      const cmd =
-        tool === "exec_command" && args && typeof args === "object"
-          ? (args as { cmd?: string }).cmd
-          : undefined;
-      console.log(`  ↳ ${tool}${cmd ? `: ${cmd}` : `(${JSON.stringify(args)})`}`);
-    } else if (item?.type === "tool_call_output_item") {
-      const callId: string = item.rawItem?.callId ?? "";
-      const call = pending.get(callId) ?? { tool: "tool", args: undefined };
-      pending.delete(callId);
-      const output =
-        typeof item.output === "string"
-          ? item.output
-          : JSON.stringify(item.output ?? "");
-      console.log(`  ↳ ${call.tool} → ${truncate(output)}`);
-      await recordToolCall({ tool: call.tool, arguments: call.args, output });
-    }
-  }
-
-  await stream.completed;
-
-  // Record any tool calls that never produced a matching output item.
-  for (const [, call] of pending) {
-    await recordToolCall({
-      tool: call.tool,
-      arguments: call.args,
-      output: "(no output captured)",
+  try {
+    const stream = await run(mainAgent, prompt, {
+      sandbox: { client: createBlaxelSandboxClient() },
+      stream: true,
     });
-  }
 
-  return (stream.finalOutput as string | undefined) ?? "";
+    // Pair each tool call with its output by callId so we record one span (with
+    // both the command and its result) per invocation.
+    const pending = new Map<string, { tool: string; args: unknown }>();
+
+    for await (const event of stream as AsyncIterable<any>) {
+      if (event.type !== "run_item_stream_event") continue;
+      const item = event.item;
+
+      if (item?.type === "tool_call_item") {
+        const { tool, args } = describeToolCall(item);
+        const callId: string = item.rawItem?.callId ?? item.rawItem?.id ?? "";
+        pending.set(callId, { tool, args });
+        const cmd =
+          tool === "exec_command" && args && typeof args === "object"
+            ? (args as { cmd?: string }).cmd
+            : undefined;
+        console.log(`  ↳ ${tool}${cmd ? `: ${cmd}` : `(${JSON.stringify(args)})`}`);
+      } else if (item?.type === "tool_call_output_item") {
+        const callId: string = item.rawItem?.callId ?? "";
+        const call = pending.get(callId) ?? { tool: "tool", args: undefined };
+        pending.delete(callId);
+        const output =
+          typeof item.output === "string"
+            ? item.output
+            : JSON.stringify(item.output ?? "");
+        console.log(`  ↳ ${call.tool} → ${truncate(output)}`);
+        await recordToolCall({ tool: call.tool, arguments: call.args, output });
+      }
+    }
+
+    await stream.completed;
+
+    // Record any tool calls that never produced a matching output item.
+    for (const [, call] of pending) {
+      await recordToolCall({
+        tool: call.tool,
+        arguments: call.args,
+        output: "(no output captured)",
+      });
+    }
+
+    return (stream.finalOutput as string | undefined) ?? "";
+  } finally {
+    // Tear down any sub-agent micro-VMs the run spawned so none leak past it.
+    await subAgents.closeAll();
+  }
 });
 
 // Public entry point for the main agent. Initializes Weave first so the run is

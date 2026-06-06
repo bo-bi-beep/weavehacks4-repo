@@ -1,8 +1,9 @@
 # main_agent
 
-A minimalistic **Sandbox Agent** built on the OpenAI Agents SDK
+A **Sandbox Agent** built on the OpenAI Agents SDK
 ([`@openai/agents`](https://www.npmjs.com/package/@openai/agents)), wired into
-this repo's W&B Weave tracing.
+this repo's W&B Weave tracing. It doubles as an **orchestrator**: it can spawn
+and delegate to a dynamic number of sandboxed sub-agents.
 
 Reference: <https://developers.openai.com/api/docs/guides/agents/sandboxes>
 
@@ -14,7 +15,8 @@ injection, jailbreaks). It runs in an isolated environment with its own
 filesystem and shell:
 
 - a `Manifest` that seeds the workspace with the loaded skills (no `task.md`)
-- a `SandboxAgent` (`mainAgent`) with the `shell()` capability
+- a `SandboxAgent` (`mainAgent`) with the `shell()` capability **and** a set of
+  function tools for spawning/driving sub-agents (see below)
 - a Weave-traced `runMainAgent(prompt)` entry point that executes the agent
   against a **Blaxel** sandbox via `BlaxelSandboxClient`
   (`@openai/agents-extensions/sandbox/blaxel`, backed by `@blaxel/core`)
@@ -46,9 +48,37 @@ The `harness` (model calls, agent logic) stays in this process; the `compute`
 (files, shell commands) runs inside a Blaxel micro-VM. The runner creates the
 sandbox session from `defaultManifest` and tears it down when the run finishes.
 
+## Orchestrating sub-agents
+
+The main agent is connected to [`agents/sub_agents`](../sub_agents/) **as
+tools**, not over HTTP. `index.ts` holds one in-process `SubAgentService`
+(the same registry the HTTP service wraps) and exposes it to the model via
+`createSubAgentTools(service)` from `sub_agent_tools.ts`:
+
+| Tool | Drives | What it does |
+| --- | --- | --- |
+| `spawn_sub_agent` | `createAgent` (+ `loadSkill`) | Create a sandboxed sub-agent (its own Blaxel micro-VM) from a `task`; optionally preload repo skills. Returns its `id`. |
+| `ask_sub_agent` | `sendMessage` | Send a message to a sub-agent and return its full reply (the SSE stream, drained to `finalOutput`). |
+| `load_skill` | `loadSkill` | Mount a repo skill's `SKILL.md` into a sub-agent. |
+| `run_in_sub_agent` | `runCommand` | Run a shell command directly in a sub-agent's sandbox (bypasses its model). |
+| `list_sub_agents` | `listAgents` | List spawned sub-agents (id, name, model, skills, turns). |
+| `stop_sub_agent` | `deleteAgent` | Remove a sub-agent and tear down its sandbox. |
+
+Because these are plain `FunctionTool`s, they execute in the harness process,
+while the agent's `shell()` runs in the sandbox — the SDK merges both into the
+agent's tool list (`agent.tools` + capability tools). So the adversarial agent
+can break an attack plan into independent probes, spawn **one sub-agent per
+probe** at runtime, delegate, then synthesize. Every tool call is streamed to the
+console and recorded as a nested Weave op; `runMainAgent` calls
+`service.closeAll()` in a `finally`, so sub-agent micro-VMs never leak past the
+run.
+
 ## Files
 
-- `index.ts` — manifest, agent definition, and the runnable CLI entry point.
+- `index.ts` — manifest, agent definition (with sub-agent tools), and the
+  runnable CLI entry point.
+- `sub_agent_tools.ts` — `createSubAgentTools(service)`: wraps a
+  `SubAgentService` as the function tools above.
 
 ## Run it
 
