@@ -4,9 +4,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { run } from "@openai/agents";
-import { Manifest, SandboxAgent, file, shell } from "@openai/agents/sandbox";
-import { UnixLocalSandboxClient } from "@openai/agents/sandbox/local";
+import {
+  Manifest,
+  SandboxAgent,
+  file,
+  shell,
+  type ExecCommandArgs,
+  type SandboxSession,
+} from "@openai/agents/sandbox";
 
+import { BlaxelSandboxClient, createBlaxelSandboxClient } from "../../src/lib/blaxel.js";
 import { getOpenAIModel, weave } from "../../src/lib/weave.js";
 
 // Repo root, used to resolve repo skills (`.claude/skills/<name>/SKILL.md`).
@@ -19,7 +26,7 @@ const SKILL_MOUNT = "skills";
 const SKILL_SEARCH_DIRS = [".claude/skills", ".agents/skills"];
 
 /** A live sandbox session, as returned by the sandbox client. */
-type SandboxSession = Awaited<ReturnType<UnixLocalSandboxClient["create"]>>;
+type SandboxSessionHandle = SandboxSession;
 
 /** Input accepted by {@link SubAgentService.createAgent}. */
 export interface CreateAgentInput {
@@ -98,7 +105,7 @@ interface AgentRecord {
   /** Running conversation, reused as input on the next turn (see SDK `result.history`). */
   history: unknown[];
   /** Live sandbox session (lazily created); owns the agent's persistent workspace. */
-  session: SandboxSession | null;
+  session: SandboxSessionHandle | null;
 }
 
 const DEFAULT_INSTRUCTIONS =
@@ -124,25 +131,105 @@ const recordTurn = weave.op(async function subAgentTurn(turn: {
 });
 
 /**
+ * Derives a unique, stable Blaxel sandbox name for an agent. Honors
+ * `BLAXEL_SANDBOX_NAME` as a prefix (so a deployment can group its sandboxes)
+ * while still giving each agent its own micro-VM. Blaxel names must be DNS-like;
+ * agent ids are UUIDs (lowercase hex + hyphens), which already satisfy that.
+ */
+function sandboxNameFor(agentId: string): string {
+  const prefix = process.env.BLAXEL_SANDBOX_NAME?.trim() || "sub-agent";
+  return `${prefix}-${agentId}`;
+}
+
+/** Result of running a command in a session, minus the echoed `command`. */
+type ExecOutcome = Omit<TerminalResult, "command">;
+
+/**
+ * Runs a command in a sandbox session, normalizing across backends.
+ *
+ * The local Unix sandbox exposes a structured `exec()` (separate stdout/stderr
+ * and an exit code). The Blaxel remote session only exposes `execCommand()`,
+ * which returns one formatted string, so we parse the header it emits to recover
+ * the exit code and wall time and surface the combined output as `stdout`.
+ */
+async function execInSession(
+  session: SandboxSessionHandle,
+  args: ExecCommandArgs,
+): Promise<ExecOutcome> {
+  if (typeof session.exec === "function") {
+    const result = await session.exec(args);
+    return {
+      stdout: result.stdout,
+      stderr: result.stderr,
+      output: result.output,
+      exitCode: result.exitCode ?? null,
+      wallTimeSeconds: result.wallTimeSeconds,
+    };
+  }
+
+  if (typeof session.execCommand === "function") {
+    const formatted = await session.execCommand(args);
+    const { body, exitCode, wallTimeSeconds } = parseExecCommand(formatted);
+    return {
+      stdout: body,
+      stderr: "",
+      output: body,
+      exitCode,
+      wallTimeSeconds,
+    };
+  }
+
+  throw new Error("This sandbox session does not support command execution");
+}
+
+/**
+ * Best-effort parse of the string `execCommand()` returns. The SDK formats it
+ * as a small header (`Wall time: ...`, `Process exited with code ...`) followed
+ * by `Output:` and the combined output. If the shape ever changes we fall back
+ * to returning the whole string as the body with an unknown exit code.
+ */
+function parseExecCommand(formatted: string): {
+  body: string;
+  exitCode: number | null;
+  wallTimeSeconds: number;
+} {
+  const marker = "\nOutput:\n";
+  const idx = formatted.indexOf(marker);
+  if (idx === -1) {
+    return { body: formatted, exitCode: null, wallTimeSeconds: 0 };
+  }
+  const header = formatted.slice(0, idx);
+  const body = formatted.slice(idx + marker.length);
+  const exit = /Process exited with code (-?\d+)/.exec(header);
+  const wall = /Wall time: ([\d.]+) seconds/.exec(header);
+  return {
+    body,
+    exitCode: exit ? Number(exit[1]) : null,
+    wallTimeSeconds: wall ? Number(wall[1]) : 0,
+  };
+}
+
+/**
  * In-memory registry of OpenAI Sandbox sub-agents.
  *
  * Mirrors `agents/main_agent` (a {@link SandboxAgent} run against a
- * {@link UnixLocalSandboxClient}) but manages many addressable agents and adds:
+ * {@link BlaxelSandboxClient}) but manages many addressable agents and adds:
  *
  * - {@link createAgent} — register a new sandbox sub-agent, return its id.
  * - {@link sendMessage} — stream a reply token-by-token (consumed as SSE).
  * - {@link loadSkill} — mount a repo skill's `SKILL.md` into the agent's workspace.
  * - {@link runCommand} — run a shell command directly in the agent's sandbox.
  *
- * Each agent owns one persistent {@link UnixLocalSandboxClient} session, so its
+ * Like `main_agent`, the compute runs on a **Blaxel** micro-VM. Each agent owns
+ * one persistent Blaxel sandbox session (a uniquely named micro-VM), so its
  * filesystem survives across messages and is shared with the terminal. Chat
  * memory persists via the SDK's `result.history`.
  */
 export class SubAgentService {
   private readonly agents = new Map<string, AgentRecord>();
-  private readonly client: UnixLocalSandboxClient;
+  private readonly client: BlaxelSandboxClient;
 
-  constructor(client: UnixLocalSandboxClient = new UnixLocalSandboxClient()) {
+  constructor(client: BlaxelSandboxClient = createBlaxelSandboxClient()) {
     this.client = client;
   }
 
@@ -314,27 +401,14 @@ export class SubAgentService {
     ): Promise<TerminalResult> => {
       const record = this.requireAgent(agentId);
       const session = await this.ensureSession(record);
-      if (typeof session.exec !== "function") {
-        throw new Error(
-          "This sandbox session does not support command execution",
-        );
-      }
-
-      const result = await session.exec({
+      const result = await execInSession(session, {
         cmd: command,
         workdir: opts.workdir,
         shell: opts.shell,
         login: opts.login,
       });
 
-      return {
-        command,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        output: result.output,
-        exitCode: result.exitCode ?? null,
-        wallTimeSeconds: result.wallTimeSeconds,
-      };
+      return { command, ...result };
     },
     { name: "subAgentTerminal" },
   );
@@ -387,10 +461,21 @@ export class SubAgentService {
     return new Manifest({ entries });
   }
 
-  /** Lazily creates (and caches) the agent's live sandbox session. */
-  private async ensureSession(record: AgentRecord): Promise<SandboxSession> {
+  /**
+   * Lazily creates (and caches) the agent's live Blaxel sandbox session.
+   *
+   * Each agent gets its own uniquely named micro-VM so their filesystems stay
+   * isolated — without an explicit `name`, two `create()` calls would
+   * auto-generate distinct sandboxes anyway, but a stable per-agent name makes
+   * the sandbox easy to find in the Blaxel console.
+   */
+  private async ensureSession(
+    record: AgentRecord,
+  ): Promise<SandboxSessionHandle> {
     if (!record.session) {
-      record.session = await this.client.create(this.buildManifest(record));
+      record.session = await this.client.create(this.buildManifest(record), {
+        name: sandboxNameFor(record.id),
+      });
     }
     return record.session;
   }
@@ -401,9 +486,10 @@ export class SubAgentService {
     record.session = null;
     if (!session) return;
     try {
+      // Prefer delete() so the Blaxel micro-VM is torn down, not just detached.
       await (session.delete?.() ?? session.close?.());
     } catch {
-      // Best-effort cleanup; the workspace lives under a temp dir.
+      // Best-effort cleanup; a leaked sandbox eventually expires via its TTL.
     }
   }
 

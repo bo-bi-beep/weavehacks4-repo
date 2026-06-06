@@ -178,6 +178,10 @@ function errMessage(err: unknown): string {
 
 async function main(): Promise<void> {
   requireEnv("OPENAI_API_KEY");
+  // Blaxel sandbox auth — each sub-agent runs on its own Blaxel micro-VM,
+  // consumed by @blaxel/core when a session is created.
+  requireEnv("BL_API_KEY");
+  requireEnv("BL_WORKSPACE");
   const tracing = await initWeave();
 
   const port = Number(process.env.PORT) || 3000;

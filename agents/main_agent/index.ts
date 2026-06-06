@@ -5,11 +5,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { run } from "@openai/agents";
 import { Manifest, SandboxAgent, file, shell } from "@openai/agents/sandbox";
-import {
-  BlaxelSandboxClient,
-  type BlaxelSandboxClientOptions,
-} from "@openai/agents-extensions/sandbox/blaxel";
 
+import { createBlaxelSandboxClient } from "../../src/lib/blaxel.js";
 import {
   getOpenAIModel,
   getWeaveProjectName,
@@ -96,25 +93,6 @@ function loadSkills(): LoadedSkill[] {
   return loaded;
 }
 
-// Build Blaxel sandbox options from the environment. Auth (BL_API_KEY,
-// BL_WORKSPACE) is read by the underlying @blaxel/core SDK; the rest tune the
-// micro-VM. Anything unset falls back to a Blaxel default.
-function getBlaxelSandboxOptions(): BlaxelSandboxClientOptions {
-  const options: BlaxelSandboxClientOptions = {
-    image: process.env.BLAXEL_SANDBOX_IMAGE?.trim() || "blaxel/base-image",
-    memory: Number(process.env.BLAXEL_SANDBOX_MEMORY?.trim()) || 4096,
-    // Default to a US West region (Portland). Other options include
-    // `eu-lon-1` (EU London) and `us-was-1` (US East). Override via
-    // BLAXEL_SANDBOX_REGION.
-    region: process.env.BLAXEL_SANDBOX_REGION?.trim() || "us-pdx-1",
-  };
-
-  const name = process.env.BLAXEL_SANDBOX_NAME?.trim();
-  if (name) options.name = name;
-
-  return options;
-}
-
 // Skills resolved once at startup and mounted into the workspace below.
 const skills = loadSkills();
 
@@ -165,7 +143,7 @@ export const loadedSkills: string[] = skills.map((skill) => skill.name);
 const runMainAgentTraced = weave.op(async function runMainAgent(prompt: string) {
   const result = await run(mainAgent, prompt, {
     sandbox: {
-      client: new BlaxelSandboxClient(getBlaxelSandboxOptions()),
+      client: createBlaxelSandboxClient(),
     },
   });
 

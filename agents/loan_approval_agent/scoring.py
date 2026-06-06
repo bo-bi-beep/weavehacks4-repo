@@ -17,7 +17,25 @@ WEIGHTS: dict[str, float] = {
     "fraud":             0.02,
 }
 
+# Baseline threshold (kept for reference; actual threshold is loan-amount-dependent).
 APPROVE_THRESHOLD = 0.50
+
+# Dynamic threshold bands: larger loans require a higher weighted score.
+_THRESHOLD_BANDS: list[tuple[float, float]] = [
+    (10_000,   0.45),   # < $10k     — small personal loan
+    (50_000,   0.50),   # $10k–$50k  — standard
+    (150_000,  0.60),   # $50k–$150k — moderate commitment
+    (500_000,  0.70),   # $150k–$500k — significant commitment
+    (float("inf"), 0.80),  # ≥ $500k — major loan
+]
+
+
+def get_approval_threshold(requested_amount: float) -> float:
+    """Return the minimum weighted score required to approve a loan of this size."""
+    for ceiling, threshold in _THRESHOLD_BANDS:
+        if requested_amount < ceiling:
+            return threshold
+    return 0.80
 
 
 # ---------------------------------------------------------------------------
@@ -189,10 +207,12 @@ def compute_score(
         sum(category_scores[k] * WEIGHTS[k] for k in WEIGHTS), 4
     )
 
+    threshold = get_approval_threshold(requested_amount)
+
     return {
         "category_scores": category_scores,
         "weights": WEIGHTS,
         "weighted_total": weighted_total,
-        "threshold": APPROVE_THRESHOLD,
-        "approve": weighted_total >= APPROVE_THRESHOLD,
+        "threshold": threshold,
+        "approve": weighted_total >= threshold,
     }

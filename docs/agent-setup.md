@@ -140,10 +140,12 @@ addressable agents:
 npm run sub:agents   # listens on PORT (default 3000)
 ```
 
-Unlike `main_agent` (which runs on Blaxel), this service uses the local Unix
-sandbox, so it needs `OPENAI_API_KEY` (plus the usual `WANDB_*` vars for Weave
-tracing) and a Unix-like host (macOS or Linux) — not the Blaxel vars. See
-`agents/sub_agents/README.md` for the full API and curl examples.
+Like `main_agent`, this service runs each agent on its own **Blaxel** micro-VM
+(via the shared `createBlaxelSandboxClient` in `src/lib/blaxel.ts`), so it needs
+`OPENAI_API_KEY`, `BL_API_KEY`, and `BL_WORKSPACE` (plus the usual `WANDB_*` vars
+for Weave tracing) and works from any host. `BLAXEL_SANDBOX_NAME`, if set, is
+used as a per-agent name prefix. See `agents/sub_agents/README.md` for the full
+API and curl examples.
 
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`.

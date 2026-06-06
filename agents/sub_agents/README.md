@@ -3,15 +3,18 @@
 A small **service** that manages many OpenAI **Sandbox Agents** behind an HTTP +
 SSE API. It builds on the same primitives as [`agents/main_agent`](../main_agent/)
 — a [`SandboxAgent`](https://developers.openai.com/api/docs/guides/agents/sandboxes)
-run against a `UnixLocalSandboxClient` — and is wired into this repo's W&B Weave
-tracing.
+run against a **Blaxel** sandbox via `BlaxelSandboxClient` — and is wired into
+this repo's W&B Weave tracing.
 
 Where `main_agent` is a single one-shot agent, `sub_agents` is a registry of
 addressable, multi-turn agents you can create, message, extend with skills, and
 drop a terminal into — all at runtime.
 
-Each agent owns **one persistent sandbox session**, so its filesystem survives
-across messages and is shared by the agent and its terminal.
+Each agent owns **one persistent Blaxel sandbox session** — its own uniquely
+named micro-VM — so its filesystem survives across messages and is shared by the
+agent and its terminal. The shared Blaxel config lives in
+[`src/lib/blaxel.ts`](../../src/lib/blaxel.ts) (`createBlaxelSandboxClient`), the
+same helper `main_agent` uses.
 
 ## Endpoints
 
@@ -60,6 +63,10 @@ reads and writes, then returns
 `{ command, stdout, stderr, output, exitCode, wallTimeSeconds }`. A non-zero
 `exitCode` is reported, not thrown.
 
+> The Blaxel remote session returns combined output rather than separate
+> streams, so `stdout` and `output` carry the merged stdout+stderr and `stderr`
+> is empty; `exitCode` and `wallTimeSeconds` are recovered best-effort.
+
 ## Run it
 
 From the **repo root** (the directory with `package.json`):
@@ -98,12 +105,21 @@ curl -N localhost:3000/agents/$ID/messages \
 
 ## Env vars
 
-- `OPENAI_API_KEY` — required (model + sandbox execution)
+- `OPENAI_API_KEY` — required (model calls)
 - `OPENAI_MODEL` — optional, defaults to `gpt-5.4-mini`
+- `BL_API_KEY` — required (Blaxel sandbox auth)
+- `BL_WORKSPACE` — required (Blaxel workspace)
+- `BLAXEL_SANDBOX_IMAGE` — optional, defaults to `blaxel/base-image`
+- `BLAXEL_SANDBOX_MEMORY` — optional MB, defaults to `4096`
+- `BLAXEL_SANDBOX_REGION` — optional, defaults to `us-pdx-1` (US West); also `eu-lon-1`, `us-was-1`
+- `BLAXEL_SANDBOX_NAME` — optional; used as a **prefix** for each agent's sandbox
+  name (`<prefix>-<agent-id>`), since each agent gets its own micro-VM
 - `WANDB_API_KEY` / `WANDB_ENTITY` / `WANDB_PROJECT` — Weave tracing
 - `PORT` — HTTP port, defaults to `3000`
 
-The local sandbox client requires a Unix-like host (macOS or Linux).
+The sandbox runs remotely on Blaxel, so no special host is required. Get
+`BL_API_KEY` / `BL_WORKSPACE` from your Blaxel workspace
+(<https://docs.blaxel.ai/Sandboxes/Overview>).
 
 ## Reuse in-process
 
