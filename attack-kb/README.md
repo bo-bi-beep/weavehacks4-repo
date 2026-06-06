@@ -58,6 +58,8 @@ npm run build
 ```text
 attack-kb/
   README.md
+  skills/
+    use-attack-kb/SKILL.md main-agent procedure for using recommendation packets
   src/
     config.ts       env and per-role model config
     runtime.ts      traced OpenAI runtime for subagents
@@ -69,4 +71,4 @@ attack-kb/
     credit-loan/    credit-loan probe seeds
 ```
 
-Future issues will add composed rich-profile attack routes, Redis Iris storage, curation UI, evals, and the main-agent usage skill.
+Future issues will add composed rich-profile attack routes, Redis Iris storage, curation UI, and evals.
