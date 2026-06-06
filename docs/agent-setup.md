@@ -22,7 +22,10 @@ export WANDB_API_KEY=your-wandb-api-key
 export WANDB_ENTITY=your-wandb-entity
 export WANDB_PROJECT=weavehacks4-your-idea
 export OPENAI_API_KEY=your-openai-api-key
-export OPENAI_MODEL=gpt-4.1-mini
+export OPENAI_MODEL=gpt-5.4-mini
+# Blaxel sandbox (compute backend for agents/main_agent)
+export BL_API_KEY=your-blaxel-api-key
+export BL_WORKSPACE=your-blaxel-workspace
 ```
 
 ## Claude Code
@@ -110,9 +113,12 @@ runtime agent in `agents/main_agent/` built on the OpenAI Agents SDK
 npm run main:agent -- "list the files in the workspace and summarize the task"
 ```
 
-It needs `OPENAI_API_KEY` (and the usual `WANDB_*` vars for Weave tracing), and
-the local sandbox client requires a Unix-like host (macOS or Linux). See
-`agents/main_agent/README.md` for details.
+The sandbox compute runs on **Blaxel** via `BlaxelSandboxClient`
+(`@openai/agents-extensions/sandbox/blaxel`, backed by `@blaxel/core`) instead
+of a local Unix process, so it works from any host. It needs `OPENAI_API_KEY`,
+`BL_API_KEY`, and `BL_WORKSPACE` (plus the usual `WANDB_*` vars for Weave
+tracing). See `agents/main_agent/README.md` for the optional sandbox tuning
+vars and details.
 
 ## Sub-agents service
 The repo also ships a multi-agent **service** in `agents/sub_agents/` built on
@@ -128,9 +134,10 @@ addressable agents:
 npm run sub:agents   # listens on PORT (default 3000)
 ```
 
-Same env requirements as `main_agent` (`OPENAI_API_KEY`, optional `WANDB_*`,
-Unix-like host). See `agents/sub_agents/README.md` for the full API and curl
-examples.
+Unlike `main_agent` (which runs on Blaxel), this service uses the local Unix
+sandbox, so it needs `OPENAI_API_KEY` (plus the usual `WANDB_*` vars for Weave
+tracing) and a Unix-like host (macOS or Linux) — not the Blaxel vars. See
+`agents/sub_agents/README.md` for the full API and curl examples.
 
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`.

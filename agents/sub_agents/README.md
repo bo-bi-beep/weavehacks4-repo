@@ -99,7 +99,7 @@ curl -N localhost:3000/agents/$ID/messages \
 ## Env vars
 
 - `OPENAI_API_KEY` — required (model + sandbox execution)
-- `OPENAI_MODEL` — optional, defaults to `gpt-4.1-mini`
+- `OPENAI_MODEL` — optional, defaults to `gpt-5.4-mini`
 - `WANDB_API_KEY` / `WANDB_ENTITY` / `WANDB_PROJECT` — Weave tracing
 - `PORT` — HTTP port, defaults to `3000`
 

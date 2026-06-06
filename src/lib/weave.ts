@@ -15,7 +15,7 @@ export function requireEnv(name: string): string {
 }
 
 export function getOpenAIModel(): string {
-  return process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini";
+  return process.env.OPENAI_MODEL?.trim() || "gpt-5.4-mini";
 }
 
 let initialized = false;
