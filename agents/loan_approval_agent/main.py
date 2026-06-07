@@ -7,7 +7,13 @@ from pydantic import BaseModel
 
 from agent import chat, create_session, sessions
 from config import HOST, PORT, WANDB_API_KEY, WANDB_ENTITY, WANDB_PROJECT
-from database import get_all_usernames, get_latest_decision, get_user, init_db
+from database import (
+    get_all_usernames,
+    get_attack_events,
+    get_latest_decision,
+    get_user,
+    init_db,
+)
 
 
 @asynccontextmanager
@@ -72,6 +78,17 @@ def user_approval_status(username: str):
         "requested_amount": decision["requested_amount"],
         "timestamp": decision["timestamp"],
     }
+
+
+@app.get("/attacks")
+def list_attacks(limit: int = 100, username: str | None = None):
+    """Return recorded successful attacks (deny→approval flips), newest first.
+
+    Each event captures the deterministic baseline that should have applied,
+    the decision actually recorded, and the `weave_trace_id` of the attack so
+    other services (e.g. the Attack KB) can poll and retrieve the full trace.
+    """
+    return {"attacks": get_attack_events(limit=limit, username=username)}
 
 
 @app.post("/sessions", response_model=NewSessionResponse, status_code=201)
