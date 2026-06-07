@@ -1,1 +1,1 @@
-Review candidate source/data context for credibility, provenance completeness, defensive relevance, and safety fit. Return a triage decision with rationale and missing information.
+Evaluate Source Retrieval packets for credibility, provenance, relevance, and safety. Return accept/reject/needs_review triage decisions. Do not write Redis.

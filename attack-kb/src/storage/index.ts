@@ -15,6 +15,7 @@ export type AttackKbStorageProvider = (typeof ATTACK_KB_STORAGE_ADAPTERS)[number
 export type AttackKbStorageConfig = {
   provider: AttackKbStorageProvider;
   localJsonPath: string;
+  seedOnEmpty: boolean;
   redisIris: {
     url?: string;
     urlSource?: AttackKbRedisUrlSource;
@@ -57,12 +58,31 @@ function parseFallback(value: string | undefined): boolean {
   );
 }
 
+function parseBoolean(value: string | undefined, defaultValue: boolean, name: string): boolean {
+  const normalized = value?.toLowerCase();
+
+  if (!normalized) {
+    return defaultValue;
+  }
+
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error(`Unsupported ${name}: ${value}. Use true or false.`);
+}
+
 export function getAttackKbStorageConfig(): AttackKbStorageConfig {
   const redisConnection = readAttackKbRedisConnectionConfig();
 
   return {
     provider: parseProvider(env("ATTACK_KB_STORAGE_ADAPTER")),
     localJsonPath: env("ATTACK_KB_LOCAL_STORAGE_PATH") || join(process.cwd(), "attack-kb", ".local", "kb.json"),
+    seedOnEmpty: parseBoolean(env("ATTACK_KB_SEED_ON_EMPTY"), true, "ATTACK_KB_SEED_ON_EMPTY"),
     redisIris: {
       url: redisConnection.url,
       urlSource: redisConnection.urlSource,
@@ -121,7 +141,7 @@ function seedAdapterWhenEmpty(
 export function createAttackKbStorageAdapter(
   config: AttackKbStorageConfig = getAttackKbStorageConfig(),
 ): AttackKbStorageAdapter {
-  const seedObjects = buildSeedAttackKbObjects();
+  const seedObjects = config.seedOnEmpty ? buildSeedAttackKbObjects() : [];
 
   if (config.provider === "local") {
     return createLocalAttackKbStorageAdapter({

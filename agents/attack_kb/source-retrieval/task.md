@@ -1,1 +1,1 @@
-Given approved source targets, retrieve source context and prepare source artifact candidates with provenance, evidence excerpts, confidence, and curation notes.
+Retrieve exactly one assigned public defensive source, extract safe evidence/provenance, and return a structured Source Retrieval packet for Credibility Triage. Do not write Redis.

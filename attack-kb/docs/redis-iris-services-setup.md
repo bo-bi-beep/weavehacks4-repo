@@ -22,6 +22,7 @@ LANGCACHE_CACHE_ID=
 LANGCACHE_API_KEY=
 LANGCACHE_THRESHOLD=0.82
 ATTACK_KB_LLM_CACHE=langcache
+ATTACK_KB_LANGCACHE_USE_ATTRIBUTES=false # keep false unless the service has configured attributes
 ATTACK_KB_LANGCACHE_FALLBACK=disabled # use local for demos if you want fail-open
 
 # Managed Redis Agent Memory service
@@ -68,11 +69,12 @@ LANGCACHE_CACHE_ID=<cache id>
 LANGCACHE_API_KEY=<one-time service key/API token>
 LANGCACHE_THRESHOLD=0.82
 ATTACK_KB_LLM_CACHE=langcache
+ATTACK_KB_LANGCACHE_USE_ATTRIBUTES=false
 ```
 
 ### CLI/API validation
 
-Run the project smoke. It optionally flushes the cache, stores a deterministic response, then confirms the second call hits managed LangCache:
+Run the project smoke. It optionally flushes the cache, stores a deterministic response, then confirms the second call hits managed LangCache. If Redis Cloud says `attributes: no attributes are configured for this cache`, keep `ATTACK_KB_LANGCACHE_USE_ATTRIBUTES=false`:
 
 ```bash
 npm run attack-kb:langcache-smoke -- --flush
@@ -109,17 +111,21 @@ npm run attack-kb:smoke -- "suggest one safe credit-loan probing recommendation"
 
 ## Agent Memory
 
+Agent Memory is a managed Redis Iris REST service. It does **not** use `REDIS_URL` for runtime API calls. You need a separate service API key.
+
 ### Get credentials
 
 Redis Cloud Console:
 
 1. Open **Agent Memory** from Context Engine / AI services.
 2. Create an Agent Memory service/store for the Attack KB database.
-3. Copy:
+3. Open the service/store access or API key section.
+4. Create/copy the Agent Memory service key. This is the value for `MEMORY_API_KEY` and may only be shown once.
+5. Copy:
    - API base URL
    - store ID
-   - API key
-4. Fill local `.env`:
+   - API key / service key
+6. Fill local `.env`:
 
 ```bash
 MEMORY_API_BASE_URL=<Agent Memory REST API base URL>
@@ -131,6 +137,8 @@ MEMORY_NAMESPACE=attack-kb
 MEMORY_SIMILARITY_THRESHOLD=0.7
 MEMORY_LIMIT=6
 ```
+
+If you do not see an API key/service-key button, the Agent Memory preview/service is probably not enabled for the Redis Cloud account yet, or the Agent Memory store has not been created. Ask Redis/hackathon support to enable Redis Iris / Context Engine Agent Memory access.
 
 Current code still has a Redis DB key-value memory adapter for run/outcome notes. Once managed Agent Memory credentials are present, wire the adapter behind `AttackKbMemoryAdapter` to the managed REST API endpoints:
 

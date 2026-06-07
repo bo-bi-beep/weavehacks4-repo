@@ -32,6 +32,7 @@ console.log(
       storage: {
         adapter: storageConfig.provider,
         localJsonPath: storageConfig.localJsonPath,
+        seedOnEmpty: storageConfig.seedOnEmpty,
         redisIris: {
           url: storageConfig.redisIris.url ? "set" : "missing",
           urlSource: storageConfig.redisIris.urlSource ?? null,
@@ -63,6 +64,7 @@ console.log(
           cacheId: cacheConfig.langCache.cacheId ? "set" : "missing",
           apiKey: cacheConfig.langCache.apiKey ? "set" : "missing",
           similarityThreshold: cacheConfig.langCache.similarityThreshold,
+          useAttributes: cacheConfig.langCache.useAttributes,
           fallbackToLocal: cacheConfig.langCache.fallbackToLocal,
           timeoutMs: cacheConfig.langCache.timeoutMs,
         },

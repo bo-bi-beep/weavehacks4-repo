@@ -1,1 +1,1 @@
-Identify candidate defensive sources and evidence gaps for the credit-loan Attack KB. Return proposed source candidates, why each matters, and what curation should check before accepting them.
+Identify candidate public defensive sources for the Attack KB source pipeline. Return source candidates and candidate IDs that should be fanned out to Source Retrieval agents. Do not retrieve full source content or write Redis.

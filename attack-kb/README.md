@@ -246,6 +246,8 @@ From repo root:
 npm run attack-kb:config
 npm run attack-kb:redis-health
 npm run attack-kb:probe
+npm run attack-kb:source-pipeline -- --max-candidates=1 --max-retrievals=1
+ATTACK_KB_CLEAR_DATA_CONFIRM=delete-attack-kb-data npm run attack-kb:clear-data
 npm run attack-kb:ingest
 npm run attack-kb:curation-ui -- --seed-demo
 npm run attack-kb:curation-smoke
@@ -259,12 +261,28 @@ npm run typecheck
 npm run build
 ```
 
-`attack-kb:config` validates configuration without making a model call. `attack-kb:redis-health` prints sanitized Redis config/readiness and intended key/index/stream names; it stays report-only unless `ATTACK_KB_REDIS_HEALTH_CONNECT=1` is set. `attack-kb:sandbox-smoke` prints Attack KB's Blaxel/SubAgentService sandbox configuration without launching Blaxel or making a model call. `attack-kb:redis-smoke` is an optional networked Redis round trip that writes canonical seed objects and reads one back when a Redis URL is configured. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:evals` runs deterministic recommendation, ingestion, provenance, and curation-quality evals; if `WANDB_API_KEY` is set, the cases are wrapped in Weave traces. `attack-kb:demo` starts the main-agent flow demo; `attack-kb:demo-smoke` validates the demo API without a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime unless the exact-key LLM cache hits.
+`attack-kb:config` validates configuration without making a model call. `attack-kb:redis-health` prints sanitized Redis config/readiness and intended key/index/stream names; it stays report-only unless `ATTACK_KB_REDIS_HEALTH_CONNECT=1` is set. `attack-kb:sandbox-smoke` prints Attack KB's Blaxel/SubAgentService sandbox configuration without launching Blaxel or making a model call. `attack-kb:redis-smoke` is an optional networked Redis round trip that writes canonical seed objects and reads one back when a Redis URL is configured. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:source-pipeline` manually runs the live Blaxel source flow: Source Discovery -> Source Retrieval fan-out -> Credibility Triage -> KB Curator -> trusted local Redis write. `attack-kb:clear-data` is a protected Redis data wipe for clean live runs. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:evals` runs deterministic recommendation, ingestion, provenance, and curation-quality evals; if `WANDB_API_KEY` is set, the cases are wrapped in Weave traces. `attack-kb:demo` starts the main-agent flow demo; `attack-kb:demo-smoke` validates the demo API without a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime unless the exact-key LLM cache hits.
 
 No-API rich-profile demo:
 
 ```bash
 npm run attack-kb:probe -- --rich-credit-loan
+```
+
+Live source pipeline:
+
+```bash
+# Finds a source, retrieves it, triages it, asks the KB Curator for a write plan,
+# then the trusted local orchestrator writes approved source_artifact records to Redis Cloud.
+npm run attack-kb:source-pipeline -- --max-candidates=1 --max-retrievals=1
+```
+
+The live source pipeline writes run packets under `.tmp/attack-kb-source-runs/<run-id>/`. Sandbox agents never receive Redis credentials: Source Discovery, Source Retrieval, and Credibility Triage cannot write Redis; KB Curator emits canonical `source_artifact` inputs only, and local trusted code persists them.
+
+Clean current Attack KB Redis data before a live-source run:
+
+```bash
+ATTACK_KB_CLEAR_DATA_CONFIRM=delete-attack-kb-data npm run attack-kb:clear-data
 ```
 
 No-OpenAI ingestion/curation demo:
@@ -283,7 +301,7 @@ ATTACK_KB_LOCAL_STORAGE_PATH=attack-kb/.local/kb.json \
 npm run attack-kb:curation-ui -- --seed-demo
 ```
 
-The ingestion path uses `attack-kb/src/ingestion/` and the curation queue primitive in `attack-kb/src/curation/`. New source artifacts and ingested data items are written through the configured storage adapter, then immediately enqueue a `curation_candidate` and fire the `manual_review_queue` flow. Source/data payloads carry provenance and evidence metadata (`originLabel`, publisher/url/version where available, retrieval time, standards refs, evidence excerpts, confidence, and locator). Categories include standards-backed language for `owasp`, `mitre_atlas`, `nist_ai_rmf_genai`, and `maestro_agentic_risk`, plus research/vendor/manual categories. If `WANDB_API_KEY` is set and no custom storage/date options are passed, `weave.op` traces the ingestion entrypoints without requiring any OpenAI call.
+The live pipeline is the production-shaped source flow. The older ingestion path uses `attack-kb/src/ingestion/` and the curation queue primitive in `attack-kb/src/curation/`; it remains a deterministic demo/helper path. Demo ingestion writes new source artifacts and ingested data items through the configured storage adapter, then immediately enqueues a `curation_candidate` and fires the `manual_review_queue` flow. Source/data payloads carry provenance and evidence metadata (`originLabel`, publisher/url/version where available, retrieval time, standards refs, evidence excerpts, confidence, and locator). Categories include standards-backed language for `owasp`, `mitre_atlas`, `nist_ai_rmf_genai`, and `maestro_agentic_risk`, plus research/vendor/manual categories. If `WANDB_API_KEY` is set and no custom storage/date options are passed, `weave.op` traces the ingestion entrypoints without requiring any OpenAI call.
 
 The curation UI lives under `attack-kb/src/curation/` and keeps the full review context on screen for each pending candidate: source object, provenance, extracted evidence, proposed canonical objects, related artifacts, confidence summary, and review history. A reviewer can:
 
@@ -348,6 +366,8 @@ attack-kb/
     retrieval/      deterministic + Redis vector/hybrid semantic context retrieval
     redis/          Redis client/env helper, Query Engine index/search support, streams/events, and health/config report command
     iris/           managed Iris service health and LangCache smoke commands
+    source-pipeline/ manual Blaxel source-discovery -> retrieval -> triage -> curator pipeline
+    maintenance/    protected Redis data-clear utilities
     memory/         run/outcome Agent Memory adapter with local fallback and Redis KV backend
     storage/        storage interface, local memory/json fallback, Redis-backed adapter
 ```

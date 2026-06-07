@@ -28,6 +28,7 @@ export type AttackKbLlmCacheConfig = {
     cacheId?: string;
     apiKey?: string;
     similarityThreshold: number;
+    useAttributes: boolean;
     fallbackToLocal: boolean;
     timeoutMs: number;
   };
@@ -206,6 +207,24 @@ function parseRedisFallback(value: string | undefined): boolean {
   );
 }
 
+function parseBooleanEnv(name: string, defaultValue: boolean): boolean {
+  const normalized = env(name)?.toLowerCase();
+
+  if (!normalized) {
+    return defaultValue;
+  }
+
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error(`Unsupported ${name}: ${normalized}. Use true or false.`);
+}
+
 function expiresAtFromNow(ttlSeconds: number): string {
   return new Date(Date.now() + ttlSeconds * 1_000).toISOString();
 }
@@ -365,6 +384,7 @@ export function getAttackKbLlmCacheConfig(): AttackKbLlmCacheConfig {
       cacheId: env("LANGCACHE_CACHE_ID"),
       apiKey: env("LANGCACHE_API_KEY"),
       similarityThreshold: Number(env("LANGCACHE_THRESHOLD") || "0.82"),
+      useAttributes: parseBooleanEnv("ATTACK_KB_LANGCACHE_USE_ATTRIBUTES", false),
       fallbackToLocal: parseRedisFallback(env("ATTACK_KB_LANGCACHE_FALLBACK") || env("ATTACK_KB_REDIS_CACHE_FALLBACK")),
       timeoutMs: parsePositiveIntegerEnv("ATTACK_KB_LANGCACHE_TIMEOUT_MS", 10_000),
     },
@@ -696,12 +716,16 @@ export function createLangCacheAttackKbLlmCache(
       const key = buildAttackKbLlmCacheKey(request, config.redis.keyPrefix);
 
       try {
-        const payload = await fetchLangCacheJson(config, "/entries/search", {
+        const searchPayload: Record<string, unknown> = {
           prompt: langCachePrompt(request),
-          attributes: langCacheAttributes(request),
           similarityThreshold: config.langCache.similarityThreshold,
           searchStrategies: ["exact", "semantic"],
-        });
+        };
+        if (config.langCache.useAttributes) {
+          searchPayload.attributes = langCacheAttributes(request);
+        }
+
+        const payload = await fetchLangCacheJson(config, "/entries/search", searchPayload);
         const entry = langCacheEntries(payload)[0];
         if (typeof entry?.response !== "string") {
           return undefined;
@@ -718,11 +742,15 @@ export function createLangCacheAttackKbLlmCache(
       const serialized = serializeStoredEntry(entry);
 
       try {
-        await fetchLangCacheJson(config, "/entries", {
+        const storePayload: Record<string, unknown> = {
           prompt: langCachePrompt(request),
           response: serialized,
-          attributes: langCacheAttributes(request),
-        });
+        };
+        if (config.langCache.useAttributes) {
+          storePayload.attributes = langCacheAttributes(request);
+        }
+
+        await fetchLangCacheJson(config, "/entries", storePayload);
 
         return {
           ...key,
