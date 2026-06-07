@@ -234,11 +234,13 @@ through `attack-kb/src/sandbox.ts`. Deterministic Attack KB demos/evals do not
 launch Blaxel; use `npm run attack-kb:sandbox-smoke` to inspect the sandbox config
 and missing live-launch env vars.
 
-For the current recommendation handoff, start the Attack KB server with
-`npm run attack-kb:server` and have the main agent use `.agents/skills/use-attack-kb/SKILL.md`.
-That skill spawns a recommendation-fetcher subagent that calls
-`POST /api/recommendations` and returns the W&B/Weave-traced recommendation packet.
-See `attack-kb/docs/attack-kb-recommendation-setup.md` for the full setup and smoke test.
+For the recommendation handoff, start the Attack KB server with
+`npm run attack-kb:server` (or point `ATTACK_KB_SERVER_URL` at a running one). At
+the start of each run the main agent calls `POST /api/recommendations` **directly**
+and seeds its prompt with the W&B/Weave-traced recommended attack paths — it no
+longer loads the `use-attack-kb` skill or spawns a recommendation-fetcher subagent
+for this. See `attack-kb/docs/attack-kb-recommendation-setup.md` for the full setup
+and smoke test.
 
 ## Fix Agent (Cursor Cloud Agents)
 The repo ships a remediation service in `agents/fix_agent/` that closes the
