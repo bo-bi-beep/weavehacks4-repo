@@ -116,10 +116,56 @@ curl -N localhost:3000/agents/$ID/messages \
   name (`<prefix>-<agent-id>`), since each agent gets its own micro-VM
 - `WANDB_API_KEY` / `WANDB_ENTITY` / `WANDB_PROJECT` — Weave tracing
 - `PORT` — HTTP port, defaults to `3000`
+- `REDIS_URL` — optional; enables the durable registry (see **Persistence** below)
+- `SUBAGENT_TTL_SECONDS` — optional; expire registry entries to match the Blaxel
+  sandbox TTL
+- `REDIS_KEY_PREFIX` — optional; Redis key prefix (default `subagent`)
+- `SUBAGENT_REATTACH` — optional; keep sandbox micro-VMs alive across restarts and
+  re-attach by name instead of recreating from the manifest (see **Persistence**)
 
 The sandbox runs remotely on Blaxel, so no special host is required. Get
 `BL_API_KEY` / `BL_WORKSPACE` from your Blaxel workspace
 (<https://docs.blaxel.ai/Sandboxes/Overview>).
+
+## Persistence & restarts
+
+By default the registry is **in-memory** — agents (and their chat history) are
+lost when the process exits. Set `REDIS_URL` to make it **durable**: each agent's
+serializable state is stored at `subagent:<id>` (with a `subagent:index` set
+listing all ids), so a restarted — or horizontally scaled — service recovers
+every agent's identity, loaded skills, and conversation memory.
+
+What is and isn't persisted:
+
+- **Persisted (in the store):** id, name, model, instructions, the workspace
+  manifest (`task.md` + loaded skills), loaded skill names, and the SDK
+  conversation `history`.
+- **Not persisted:** the live Blaxel sandbox session — it's a per-process socket.
+  It's cached in memory and re-opened on demand.
+
+**Registry durability** (above) and **sandbox filesystem continuity** are
+separate concerns:
+
+- The Redis registry always survives a restart — agents keep their identity,
+  skills, and chat history.
+- The live sandbox's *filesystem* is recovered only on the recreate path by
+  default. On a cache miss (e.g. the first request after a restart) the service
+  **recreates** the sandbox from the stored manifest — the agent keeps its memory
+  and seed files (`task.md` + skills); only un-persisted scratch files are lost.
+
+Set `SUBAGENT_REATTACH=1` to instead keep micro-VMs alive on shutdown (detach,
+not destroy) and **re-attach** to the agent's existing, uniquely named VM on the
+next request, preserving files written mid-run. An explicit `DELETE /agents/:id`
+always tears the VM down regardless.
+
+> Re-attach is feature-detected against the sandbox client and safely falls back
+> to recreate-from-manifest. Enable `SUBAGENT_REATTACH` only after confirming the
+> exact re-attach method for your installed `@openai/agents-extensions`; with a
+> kept-alive VM that the client can't re-attach to, a recreate could collide.
+
+A single durable instance works out of the box. Running **multiple** instances
+additionally needs a per-agent lock (so two requests don't drive the same
+sandbox at once) — the `subagent:lock:<id>` key is reserved for that next step.
 
 ## Reuse in-process
 
@@ -159,4 +205,8 @@ trace.
 - `service.ts` — `SubAgentService`: `createAgent`, `sendMessage`, `loadSkill`,
   `runCommand`.
 - `server.ts` — `node:http` server exposing the endpoints (SSE for messages).
+- `store.ts` — `SubAgentStore` interface, `InMemorySubAgentStore`, and the
+  `createSubAgentStore()` env-driven factory.
+- `redis_store.ts` — `RedisSubAgentStore`, the durable registry used when
+  `REDIS_URL` is set.
 - `index.ts` — barrel re-export for in-process reuse.
