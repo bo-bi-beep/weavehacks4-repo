@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "dashboard:build": "next build apps/demo-dashboard",
+    "dashboard:dev": "next dev apps/demo-dashboard --hostname 127.0.0.1 --port 3001",
+    "dashboard:test": "node --import tsx --test apps/demo-dashboard/lib/*.test.ts",
+    "dashboard:typecheck": "tsc -p apps/demo-dashboard/tsconfig.json --noEmit",
     "main:agent": "tsx agents/main_agent/index.ts",
     "main:serve": "tsx agents/main_agent/server.ts",
     "sub:agents": "tsx agents/sub_agents/server.ts",
@@ -34,15 +38,24 @@
   },
   "dependencies": {
     "@blaxel/core": "^0.2.87",
+    "@copilotkit/react-core": "^1.59.5",
+    "@copilotkit/runtime": "^1.59.5",
     "@openai/agents": "^0.11.6",
     "@openai/agents-extensions": "^0.11.6",
+    "@phosphor-icons/react": "^2.1.10",
     "dotenv": "^17.4.2",
+    "next": "^16.2.7",
     "openai": "^6.42.0",
     "redis": "^6.0.0",
-    "weave": "^0.15.1"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "weave": "^0.15.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }

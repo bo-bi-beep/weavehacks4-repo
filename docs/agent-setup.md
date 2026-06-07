@@ -24,6 +24,7 @@ export WANDB_PROJECT=weavehacks4-attack-kb
 export OPENAI_API_KEY=your-openai-api-key
 export MAIN_AGENT_MODEL=gpt-5.5   # Main Agent (orchestrator) model
 export OPENAI_MODEL=gpt-5.4-mini  # sub-agents' model
+export COPILOT_MODEL=openai/gpt-4o-mini
 
 # Blaxel sandbox (compute backend for agents/main_agent, agents/sub_agents,
 # and live Attack KB sandbox agents)
@@ -266,6 +267,20 @@ optional overrides. The Cloud Agent runs remotely on Cursor's infrastructure, so
 this service only needs outbound network. The launch + wait is Weave-traced as
 `fixLoanApprovalAgent` (the prompt and result are logged; the API key is not).
 See `agents/fix_agent/README.md` for the full API and curl examples.
+
+## CopilotKit demo dashboard
+The hackathon demo UI lives in `apps/demo-dashboard/`. It is replay-first: the
+dashboard reads curated Weave-backed attack/regression records from
+`apps/demo-dashboard/lib/replay.ts`, while the CopilotKit sidebar acts as a
+presenter that can select rounds, explain score evidence, and point to W&B
+Weave trace links.
+
+```bash
+npm run dashboard:dev
+```
+
+Use `COPILOT_MODEL` to choose the sidebar model independently from the runtime
+agent model. The default is `openai/gpt-4o-mini`.
 
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`, and Attack KB model calls expect your local `OPENAI_API_KEY`.
