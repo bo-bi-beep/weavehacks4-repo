@@ -243,8 +243,13 @@ def _notify_fix_agent(session: dict, args: dict, decision: str, expected_decisio
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                print(f"[fix-agent] notified — HTTP {resp.status} from {url}")
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                body = json.loads(resp.read().decode())
+                pr_url = body.get("prUrl", "")
+                if pr_url:
+                    print(f"[fix-agent] PR opened for review: {pr_url}")
+                else:
+                    print(f"[fix-agent] notified — HTTP {resp.status}, no PR url yet")
         except urllib.error.URLError as exc:
             print(f"[fix-agent] notification failed: {exc}")
         except Exception as exc:  # noqa: BLE001
