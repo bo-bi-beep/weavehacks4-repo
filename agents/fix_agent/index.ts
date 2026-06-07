@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { initWeave, isWeaveEnabled, weave } from "../../src/lib/weave.js";
+import { initWeave, isWeaveEnabled, weave } from "./lib/weave.js";
 import {
   CursorClient,
   isTerminalStatus,

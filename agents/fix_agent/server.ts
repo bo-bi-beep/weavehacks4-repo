@@ -3,7 +3,7 @@ import "dotenv/config";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 
-import { getWeaveProjectName, initWeave, isWeaveEnabled } from "../../src/lib/weave.js";
+import { getWeaveProjectName, initWeave, isWeaveEnabled } from "./lib/weave.js";
 import {
   DEFAULT_REPOSITORY,
   getFixAgentStatus,

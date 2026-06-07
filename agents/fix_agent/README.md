@@ -112,15 +112,42 @@ curl -s http://localhost:$PORT/agents/<agentId>
 | `FIX_AGENT_REPO` | this repo's origin | GitHub repo the agent operates on. |
 | `FIX_AGENT_REF` | `main` | Branch the agent forks from. |
 | `FIX_AGENT_MODEL` | (Cursor default) | Model for the Cloud Agent. |
-| `FIX_AGENT_PORT` | `3040` | HTTP port for `fix:serve`. |
+| `FIX_AGENT_PORT` / `PORT` | `3040` | HTTP port for the server. |
 | `FIX_AGENT_WAIT_MS` | `600000` | How long `POST /fix` waits for the PR url. |
+| `WANDB_API_KEY` | — | Optional. Enables W&B Weave tracing. |
+| `WANDB_ENTITY` | — | Optional. W&B entity (username or team). |
+| `WANDB_PROJECT` | `fix-agent` | W&B project name. |
+
+## Deployment (Railway)
+
+This directory is self-contained and deploys as its own Railway service.
+
+```
+Production URL: https://fix-agent-production-4b79.up.railway.app
+Railway project: fix-agent (heimdallr66's Projects)
+```
+
+To redeploy after changes:
+
+```bash
+cd agents/fix_agent
+railway link --project fix-agent
+railway up
+```
+
+The loan approval agent sends fix requests automatically (via `FIX_AGENT_URL` env var)
+whenever a loan decision diverges from the DB-baseline expected decision.
 
 ## Files
 
 ```
 fix_agent/
-  cursor.ts   — Cursor Background Agents API client (launch / poll / conversation)
-  index.ts    — trace serializer, remediation prompt, runFixAgent (Weave-traced)
-  server.ts   — HTTP endpoints (POST /fix, GET /agents/:id, GET /health)
-  smoke.ts    — dry-run + --live smoke test
+  lib/weave.ts  — local Weave init/tracing helpers (no external workspace deps)
+  cursor.ts     — Cursor Background Agents API client (launch / poll / conversation)
+  index.ts      — trace serializer, remediation prompt, runFixAgent (Weave-traced)
+  server.ts     — HTTP endpoints (POST /fix, GET /agents/:id, GET /health)
+  smoke.ts      — dry-run + --live smoke test
+  package.json  — self-contained Node.js project (tsx, weave, dotenv)
+  tsconfig.json — TypeScript config
+  railway.toml  — Railway deployment config (startCommand: npm start)
 ```

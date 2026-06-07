@@ -2,5 +2,5 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "npm run fix:serve"
+startCommand = "npm start"
 restartPolicyType = "on_failure"

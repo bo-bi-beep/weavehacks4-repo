@@ -1,4 +1,4 @@
-import { requireEnv } from "../../src/lib/weave.js";
+import { requireEnv } from "./lib/weave.js";
 
 /**
  * Minimal client for the Cursor Background Agents (Cloud Agents) API.
