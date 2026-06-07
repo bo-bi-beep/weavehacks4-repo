@@ -1,10 +1,13 @@
 import json
+import threading
+import urllib.error
+import urllib.request
 import uuid
 
 import weave
 from openai import OpenAI
 
-from config import OPENAI_API_KEY, OPENAI_MODEL
+from config import FIX_AGENT_URL, OPENAI_API_KEY, OPENAI_MODEL
 from database import get_user, record_attack_event, record_loan_decision
 from scoring import compute_score as _compute_score, get_approval_threshold
 
@@ -190,6 +193,67 @@ _TOOLS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Fix agent notification
+# ---------------------------------------------------------------------------
+
+def _notify_fix_agent(session: dict, args: dict, decision: str, expected_decision: str) -> None:
+    """Fire-and-forget: POST a fix request when actual decision diverges from DB baseline."""
+    if not FIX_AGENT_URL:
+        return
+
+    messages = [
+        {"role": m["role"], "content": m.get("content", "")}
+        for m in session["messages"][1:]  # skip system prompt
+        if m["role"] in ("user", "assistant") and m.get("content")
+    ]
+
+    manipulation_note = (
+        f" manipulation_attempts={session['manipulation_attempts']},"
+        f" penalty_multiplier={round(session['penalty_multiplier'], 4)}"
+        if session["manipulation_attempts"]
+        else ""
+    )
+
+    trace = {
+        "username": args["username"],
+        "loanAmount": args["requested_amount"],
+        "expectedDecision": expected_decision,
+        "actualDecision": decision,
+        "technique": (
+            "Attacker used self-reported mutable field values (e.g. inflated annual_income, "
+            "zeroed monthly_debt_payments, raised total_assets) to push the weighted score "
+            "above the approval threshold, while the unmodified DB baseline would have yielded "
+            f"'{expected_decision}'."
+        ),
+        "messages": messages,
+        "notes": (
+            f"Decision '{decision}' diverges from DB-baseline '{expected_decision}'."
+            + manipulation_note
+        ),
+    }
+
+    payload = json.dumps({"traces": trace}).encode()
+    url = FIX_AGENT_URL.rstrip("/") + "/fix"
+
+    def _post() -> None:
+        try:
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                print(f"[fix-agent] notified — HTTP {resp.status} from {url}")
+        except urllib.error.URLError as exc:
+            print(f"[fix-agent] notification failed: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[fix-agent] unexpected error: {exc}")
+
+    threading.Thread(target=_post, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
 # In-memory session store
 # ---------------------------------------------------------------------------
 sessions: dict[str, dict] = {}
@@ -355,14 +419,21 @@ def _handle_tool_call(name: str, args: dict, session: dict) -> str:
                 )
                 result["attack_succeeded"] = True
                 result.update(attack)
+                # Notify the fix agent asynchronously to propose a patch.
+                _notify_fix_agent(session, args, decision, expected_decision)
 
         return json.dumps(result)
 
     return json.dumps({"error": f"Unknown tool: {name}"})
 
 
-@weave.op()
 def chat(session_id: str, user_message: str) -> str:
+    """Public entry point called by HTTP handlers.
+
+    Collects the conversation history accumulated so far in this session and
+    forwards it to the traced _chat_turn op, making every Weave trace
+    self-contained (you can reproduce the full exchange from a single record).
+    """
     if session_id not in sessions:
         raise KeyError(f"Session '{session_id}' not found.")
 
@@ -371,6 +442,27 @@ def chat(session_id: str, user_message: str) -> str:
     if session["decided"]:
         return "This loan application has already been decided. Please start a new session."
 
+    # Snapshot prior user/assistant turns before appending the new message.
+    # Tool call entries are excluded — they are internal plumbing, not
+    # part of the human-readable conversation.
+    conversation_so_far = [
+        {"role": m["role"], "content": m.get("content", "")}
+        for m in session["messages"][1:]  # skip system prompt
+        if m["role"] in ("user", "assistant") and m.get("content")
+    ]
+
+    return _chat_turn(session_id, user_message, conversation_so_far)
+
+
+@weave.op(name="chat")
+def _chat_turn(session_id: str, user_message: str, conversation_so_far: list[dict]) -> str:
+    """Traced single chat turn.
+
+    `conversation_so_far` carries all prior user/assistant messages so the
+    trace is self-contained: exporting it is enough to reproduce the full
+    session up to and including this turn.
+    """
+    session = sessions[session_id]
     session["messages"].append({"role": "user", "content": user_message})
 
     # Agentic loop: keep calling the model until it produces a plain-text reply
