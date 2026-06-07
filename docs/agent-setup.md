@@ -23,6 +23,7 @@ export WANDB_ENTITY=your-wandb-entity
 export WANDB_PROJECT=weavehacks4-your-idea
 export OPENAI_API_KEY=your-openai-api-key
 export OPENAI_MODEL=gpt-5.4-mini
+export COPILOT_MODEL=openai/gpt-4o-mini
 # Blaxel sandbox (compute backend for agents/main_agent)
 export BL_API_KEY=your-blaxel-api-key
 export BL_WORKSPACE=your-blaxel-workspace
@@ -155,6 +156,20 @@ Like `main_agent`, this service runs each agent on its own **Blaxel** micro-VM
 for Weave tracing) and works from any host. `BLAXEL_SANDBOX_NAME`, if set, is
 used as a per-agent name prefix. See `agents/sub_agents/README.md` for the full
 API and curl examples.
+
+## CopilotKit demo dashboard
+The hackathon demo UI lives in `apps/demo-dashboard/`. It is replay-first: the
+dashboard reads curated Weave-backed attack/regression records from
+`apps/demo-dashboard/lib/replay.ts`, while the CopilotKit sidebar acts as a
+presenter that can select rounds, explain score evidence, and point to W&B
+Weave trace links.
+
+```bash
+npm run dashboard:dev
+```
+
+Use `COPILOT_MODEL` to choose the sidebar model independently from the runtime
+agent model. The default is `openai/gpt-4o-mini`.
 
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`.

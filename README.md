@@ -6,9 +6,9 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - TypeScript/Node starter with Weave helpers in `src/lib/weave.ts`
 - OpenAI + Weave example path in `src/index.ts`
 - Weave smoke test in `src/smoke.ts`
-- Python `SubAgentManager` for parallel FinTech loan-agent red teaming in `agents/sub_agent_manager.py`
 - Adversarial OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` (`npm run main:agent`) that attacks the Loan Approval Agent for vulnerabilities, loads the `loan-approval-agent` skill by default (`MAIN_AGENT_SKILLS` to override), and can orchestrate sub-agents as tools
 - Sub-agents service in `agents/sub_agents/` — used both as an HTTP/SSE API (`npm run sub:agents`) and in-process as the main agent's sub-agent tools
+- Replay-first CopilotKit + Weave demo dashboard in `apps/demo-dashboard/` (`npm run dashboard:dev`)
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
 - Agent setup docs in `docs/agent-setup.md`
@@ -23,10 +23,9 @@ npm run weave:smoke -- "an agent with visible evals and traces"
 npm run dev -- "help me turn inbox triage into a weekend demo"
 ```
 
-Python red-team demo:
+Dashboard demo:
 ```bash
-python3.10 -m pip install -r requirements.txt
-python3.10 -m agents.sub_agent_manager
+npm run dashboard:dev
 ```
 
 Export selected Weave trace fields:
@@ -58,6 +57,9 @@ Fill in:
 - `npm run dev -- "problem statement"`
 - `npm run main:agent -- "task for the sandbox agent"`
 - `npm run sub:agents` (starts the sub-agents service on `PORT`, default `3000`)
+- `npm run dashboard:dev` (starts the CopilotKit Weave replay dashboard)
+- `npm run dashboard:test`
+- `npm run dashboard:typecheck`
 
 ## Agent setup
 See `docs/agent-setup.md`.
@@ -77,6 +79,8 @@ Repo includes:
 agents/   agent logic, prompts, tool wiring
   main_agent/  OpenAI Sandbox Agent (Weave-traced); orchestrates sub-agents as tools
   sub_agents/  service: create_agent, send_message, load_skill, terminal (HTTP/SSE + in-process)
+apps/     demo applications
+  demo-dashboard/  replay-first CopilotKit dashboard for Weave traces and regressions
 evals/    datasets and evaluation scripts
 scripts/  setup/dev helpers
 docs/     hackathon notes, submission copy, demo plan
