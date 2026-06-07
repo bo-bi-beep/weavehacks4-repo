@@ -7,7 +7,7 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - OpenAI + Weave example path in `src/index.ts`
 - Weave smoke test in `src/smoke.ts`
 - Python `SubAgentManager` for parallel FinTech loan-agent red teaming in `agents/sub_agent_manager.py`
-- Adversarial OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` (`npm run main:agent`) that attacks the Loan Approval Agent for vulnerabilities, loads the `loan-approval-agent` skill by default (`MAIN_AGENT_SKILLS` to override), and can orchestrate sub-agents as tools
+- Adversarial OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` (`npm run main:agent` for the one-shot CLI, `npm run main:serve` for the HTTP service) that attacks the Loan Approval Agent for vulnerabilities, loads the `loan-approval-agent` skill by default (`MAIN_AGENT_SKILLS` to override), and can orchestrate sub-agents as tools
 - Sub-agents service in `agents/sub_agents/` — used both as an HTTP/SSE API (`npm run sub:agents`) and in-process as the main agent's sub-agent tools
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
@@ -56,8 +56,36 @@ Fill in:
 - `npm run typecheck`
 - `npm run weave:smoke -- "idea"`
 - `npm run dev -- "problem statement"`
-- `npm run main:agent -- "task for the sandbox agent"`
+- `npm run main:agent -- "task for the sandbox agent"` (one-shot CLI)
+- `npm run main:serve` (main agent as an HTTP service on `MAIN_AGENT_PORT`/`PORT`, default `8080`)
 - `npm run sub:agents` (starts the sub-agents service on `PORT`, default `3000`)
+
+## Deploying the main agent
+The main agent is a one-shot CLI by default; `agents/main_agent/server.ts` wraps
+it as a long-running HTTP service so it can be deployed:
+
+```bash
+npm run main:serve                       # local: POST /run, GET /health
+curl -s localhost:8080/health
+curl -s localhost:8080/run -X POST -H 'content-type: application/json' \
+  -d '{"prompt":"attack the loan agent as dave"}'
+```
+
+Each `POST /run` runs the orchestrator once against a fresh Blaxel sandbox with
+its own sub-agent registry, so concurrent requests are isolated. Only the harness
+runs in-process — the shell/file compute runs on Blaxel micro-VMs — so the
+service just needs the same env vars and outbound network. A `Dockerfile` is
+included; build and run with the credentials passed at runtime:
+
+```bash
+docker build -t main-agent .
+docker run --rm -p 8080:8080 \
+  -e OPENAI_API_KEY -e BL_API_KEY -e BL_WORKSPACE \
+  -e WANDB_API_KEY -e WANDB_ENTITY -e WANDB_PROJECT \
+  main-agent
+```
+
+See `agents/main_agent/README.md` for the full endpoint and env reference.
 
 ## Agent setup
 See `docs/agent-setup.md`.

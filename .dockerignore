@@ -1,0 +1,19 @@
+# Keep the build context (and image) lean. Note: secrets and local state never
+# get copied — credentials are passed at runtime as env vars.
+node_modules
+.git
+.env
+.env.*
+!.env.example
+.context
+dist
+
+# Python loan-approval target isn't part of the Node service image.
+agents/loan_approval_agent
+**/__pycache__
+**/*.pyc
+.venv
+
+# Editor / OS noise
+.DS_Store
+*.log
