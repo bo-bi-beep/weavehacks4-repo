@@ -53,9 +53,12 @@ _SCHEMA_STMTS = [
         penalty_multiplier    DOUBLE PRECISION,
         manipulation_attempts INTEGER           NOT NULL DEFAULT 0,
         weave_trace_id        TEXT,
+        proposed_fix          TEXT,
         timestamp             TIMESTAMP         NOT NULL DEFAULT NOW()
     )
     """,
+    # Migration: add proposed_fix to existing tables created before this column existed.
+    "ALTER TABLE attack_events ADD COLUMN IF NOT EXISTS proposed_fix TEXT",
 ]
 
 # username, full_name, age, identity_verified,
@@ -300,10 +303,24 @@ def record_attack_event(
         conn.close()
 
 
+def update_attack_event_fix(event_id: int, pr_url: str) -> None:
+    """Set the proposed_fix PR URL on an existing attack_events row."""
+    conn = _connect()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE attack_events SET proposed_fix = %s WHERE id = %s",
+                    (pr_url, event_id),
+                )
+    finally:
+        conn.close()
+
+
 _ATTACK_COLUMNS = """id, username, requested_amount, loan_purpose,
                      expected_decision, actual_decision,
                      baseline_score, final_score, penalty_multiplier,
-                     manipulation_attempts, weave_trace_id,
+                     manipulation_attempts, weave_trace_id, proposed_fix,
                      to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') AS timestamp"""
 
 
