@@ -36,11 +36,11 @@ const roleModelEnvNames: Record<AttackKbAgentRole, string> = {
 };
 
 const defaultRoleModels: Record<AttackKbAgentRole, string> = {
-  sourceDiscovery: "gpt-4.1-mini",
-  sourceRetrieval: "gpt-4.1-mini",
-  credibilityTriage: "gpt-4.1",
-  kbCurator: "gpt-4.1",
-  recommendationBuilder: "gpt-4.1",
+  sourceDiscovery: "gpt-5.4-mini",
+  sourceRetrieval: "gpt-5.4-mini",
+  credibilityTriage: "gpt-5.5",
+  kbCurator: "gpt-5.5",
+  recommendationBuilder: "gpt-5.5",
 };
 
 function env(name: string): string | undefined {

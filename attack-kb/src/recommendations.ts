@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { recordMemory } from "./memory/index.js";
 import { recordAttackKbEvent } from "./redis/streams.js";
+import { searchAttackKbSemanticContext } from "./retrieval/index.js";
 import { getDefaultAttackKbStorageAdapter, type AttackKbStorageAdapter } from "./storage/index.js";
 import type {
   AgentUnderTestProfile,
@@ -9,6 +10,8 @@ import type {
   AttackKbMemoryAdapter,
   AttackKbRef,
   AttackKbResponse,
+  AttackKbRetrievedContext,
+  AttackKbStorageObjectType,
   AttackRecommendation,
   BusinessAttackRoute,
   DomainDecisionFactor,
@@ -27,6 +30,10 @@ export type AttackKbRecommendationOptions = {
   generatedAt?: Date;
   storage?: AttackKbStorageAdapter;
   memory?: AttackKbMemoryAdapter | false;
+  mainIrisContext?: false | {
+    limit?: number;
+    minScore?: number;
+  };
 };
 
 type CreditLoanKnowledge = {
@@ -216,6 +223,152 @@ function buildKbRefs(knowledge: CreditLoanKnowledge): AttackKbRef[] {
   ];
 }
 
+const PROBING_IRIS_OBJECT_TYPES: AttackKbStorageObjectType[] = [
+  "domain_decision_factor",
+  "recon_probe",
+  "evidence_source",
+  "source_artifact",
+  "ingested_data_item",
+];
+
+const ATTACK_IRIS_OBJECT_TYPES: AttackKbStorageObjectType[] = [
+  "business_attack_route",
+  "domain_scenario",
+  "system_attack_pattern",
+  "vulnerability",
+  "attack_pattern",
+  "delivery_mode",
+  "success_signal",
+  "evidence_source",
+  "source_artifact",
+  "ingested_data_item",
+];
+
+function buildMainIrisQuery(
+  profile: AgentUnderTestProfile,
+  phase: "probing" | "attack",
+  knowledge: CreditLoanKnowledge,
+): string {
+  if (phase === "probing") {
+    return [
+      "credit loan main agent needs safe synthetic recon probes",
+      "discover which decision factors the Agent Under Test uses",
+      knowledge.decisionFactors.map((factor) => `${factor.name} ${factor.label}`).join(" "),
+      profile.techStack?.join(" "),
+      profile.tools?.join(" "),
+      profile.policies?.join(" "),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return [
+    "credit loan main agent needs composed defensive attack route recommendations",
+    "match observed target decision factors to business routes, domain scenarios, system patterns, success signals, and evidence",
+    profile.observedDecisionFactors
+      ?.map((factor) => `${factor.factorRef}: ${factor.evidence} confidence=${factor.confidence}`)
+      .join("\n"),
+    profile.observedBehavior?.map((behavior) => `${behavior.summary} ${behavior.evidence ?? ""}`).join("\n"),
+    profile.techStack?.join(" "),
+    profile.modelStack?.join(" "),
+    profile.tools?.join(" "),
+    profile.memoryOrRag?.join(" "),
+    profile.permissions?.join(" "),
+    profile.policies?.join(" "),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function previewText(text: string): string {
+  const normalized = text.replace(/\s+/gu, " ").trim();
+  return normalized.length > 280 ? `${normalized.slice(0, 277)}...` : normalized;
+}
+
+async function retrieveMainIrisContext(
+  profile: AgentUnderTestProfile,
+  phase: "probing" | "attack",
+  knowledge: CreditLoanKnowledge,
+  storage: AttackKbStorageAdapter,
+  options: AttackKbRecommendationOptions,
+): Promise<AttackKbRetrievedContext | undefined> {
+  if (options.mainIrisContext === false) {
+    return undefined;
+  }
+
+  const query = buildMainIrisQuery(profile, phase, knowledge);
+  const result = await searchAttackKbSemanticContext(
+    query,
+    {
+      domain: profile.domain ?? "credit_loan",
+      objectType: phase === "probing" ? PROBING_IRIS_OBJECT_TYPES : ATTACK_IRIS_OBJECT_TYPES,
+    },
+    {
+      storage,
+      limit: options.mainIrisContext?.limit ?? 8,
+      minScore: options.mainIrisContext?.minScore,
+      materialize: true,
+    },
+  );
+
+  return {
+    usedFor: "main_agent_recommendation",
+    p1SubagentContextRetrieval: false,
+    query,
+    backend: result.backend,
+    generatedAt: result.generatedAt,
+    resultCount: result.results.length,
+    indexName: result.indexName,
+    keyPrefix: result.keyPrefix,
+    refs: result.results.map((item) => ({
+      id: item.object.id,
+      storageType: item.object.objectType,
+      title: item.object.title,
+      score: item.score,
+      backend: item.backend,
+      chunkId: item.chunk.id,
+      textPreview: previewText(item.chunk.text),
+    })),
+  };
+}
+
+function contextScoreMap(context: AttackKbRetrievedContext | undefined): Map<string, number> {
+  const scores = new Map<string, number>();
+
+  for (const ref of context?.refs ?? []) {
+    scores.set(ref.id, Math.max(scores.get(ref.id) ?? 0, ref.score));
+  }
+
+  return scores;
+}
+
+function recommendationContextIds(recommendation: AttackRecommendation): string[] {
+  return [
+    ...recommendation.domainDecisionFactorRefs,
+    ...(recommendation.reconProbeRefs ?? []),
+    ...(recommendation.businessAttackRouteRefs ?? []),
+    ...(recommendation.domainScenarioRefs ?? []),
+    ...(recommendation.systemPatternRefs ?? []),
+  ];
+}
+
+function rankRecommendationsWithIrisContext(
+  recommendations: AttackRecommendation[],
+  context: AttackKbRetrievedContext | undefined,
+): AttackRecommendation[] {
+  const scores = contextScoreMap(context);
+  if (scores.size === 0) {
+    return recommendations;
+  }
+
+  return [...recommendations].sort((left, right) => {
+    const leftScore = recommendationContextIds(left).reduce((total, id) => total + (scores.get(id) ?? 0), 0);
+    const rightScore = recommendationContextIds(right).reduce((total, id) => total + (scores.get(id) ?? 0), 0);
+
+    return rightScore - leftScore || left.id.localeCompare(right.id);
+  });
+}
+
 let warnedAboutRecommendationMemory = false;
 
 function warnRecommendationMemorySkipped(error: unknown): void {
@@ -261,6 +414,7 @@ async function recordRecommendationRunMemory(
           recommendationIds: response.recommendations.map((recommendation) => recommendation.id),
           missingInfoKeys: response.missingInfo.map((info) => info.key),
           kbRefIds: response.kbRefs.map((ref) => ref.id),
+          retrievedContextRefIds: response.retrievedContext?.refs.map((ref) => ref.id),
           directAutContactByAttackKb: false,
           safeSyntheticOnly: true,
         },
@@ -286,28 +440,24 @@ export async function getAttackKbRecommendations(
   const knowledge = await loadCreditLoanKnowledge(storage);
   const generatedAt = options.generatedAt ?? new Date();
   const requestId = options.requestId ?? randomUUID();
+  const phase = hasObservedDecisionFactors(profile) ? "attack" : "probing";
+  const retrievedContext = await retrieveMainIrisContext(profile, phase, knowledge, storage, options);
+  const recommendations = rankRecommendationsWithIrisContext(
+    phase === "probing" ? buildProbingRecommendations(knowledge) : buildAttackRecommendations(profile, knowledge),
+    retrievedContext,
+  );
 
-  const response: AttackKbResponse = !hasObservedDecisionFactors(profile)
-    ? {
-        requestId,
-        generatedAt: generatedAt.toISOString(),
-        domain,
-        phase: "probing",
-        systemBoundary: SYSTEM_BOUNDARY,
-        missingInfo: buildMissingInfo(profile, knowledge),
-        recommendations: buildProbingRecommendations(knowledge),
-        kbRefs: buildKbRefs(knowledge),
-      }
-    : {
-        requestId,
-        generatedAt: generatedAt.toISOString(),
-        domain,
-        phase: "attack",
-        systemBoundary: SYSTEM_BOUNDARY,
-        missingInfo: buildMissingInfo(profile, knowledge),
-        recommendations: buildAttackRecommendations(profile, knowledge),
-        kbRefs: buildKbRefs(knowledge),
-      };
+  const response: AttackKbResponse = {
+    requestId,
+    generatedAt: generatedAt.toISOString(),
+    domain,
+    phase,
+    systemBoundary: SYSTEM_BOUNDARY,
+    missingInfo: buildMissingInfo(profile, knowledge),
+    recommendations,
+    kbRefs: buildKbRefs(knowledge),
+    retrievedContext,
+  };
 
   await recordAttackKbEvent({
     type: "recommendation_requested",
@@ -321,6 +471,15 @@ export async function getAttackKbRecommendations(
       recommendationCount: response.recommendations.length,
       observedDecisionFactorCount: profile.observedDecisionFactors?.length ?? 0,
       kbRefCount: response.kbRefs.length,
+      retrievedContext: response.retrievedContext
+        ? {
+            usedFor: response.retrievedContext.usedFor,
+            backend: response.retrievedContext.backend,
+            indexName: response.retrievedContext.indexName,
+            resultCount: response.retrievedContext.resultCount,
+            p1SubagentContextRetrieval: response.retrievedContext.p1SubagentContextRetrieval,
+          }
+        : undefined,
       storage: {
         adapter: storage.name,
         backend: storage.backend,

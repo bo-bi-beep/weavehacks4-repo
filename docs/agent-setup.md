@@ -31,18 +31,19 @@ export BL_WORKSPACE=your-blaxel-workspace
 
 # Attack KB fleet: OpenAI powers model calls; W&B powers Weave traces.
 export ATTACK_KB_LLM_PROVIDER=openai
-export ATTACK_KB_SOURCE_DISCOVERY_MODEL=gpt-4.1-mini
-export ATTACK_KB_SOURCE_RETRIEVAL_MODEL=gpt-4.1-mini
-export ATTACK_KB_CREDIBILITY_TRIAGE_MODEL=gpt-4.1
-export ATTACK_KB_CURATOR_MODEL=gpt-4.1
-export ATTACK_KB_RECOMMENDER_MODEL=gpt-4.1
+export ATTACK_KB_SOURCE_DISCOVERY_MODEL=gpt-5.4-mini
+export ATTACK_KB_SOURCE_RETRIEVAL_MODEL=gpt-5.4-mini
+export ATTACK_KB_CREDIBILITY_TRIAGE_MODEL=gpt-5.5
+export ATTACK_KB_CURATOR_MODEL=gpt-5.5
+export ATTACK_KB_RECOMMENDER_MODEL=gpt-5.5
 
 # Optional Attack KB LLM cache. Keep disabled unless you want local/Redis exact-key caching.
 export ATTACK_KB_LLM_CACHE=disabled # disabled | local | redis
 export ATTACK_KB_LLM_CACHE_TTL_SECONDS=86400
 
-# Optional Attack KB vector/hybrid retrieval. Keep local for no-network deterministic demos;
-# use redis/auto only when Redis Stack/RediSearch is configured.
+# P0 main-agent Iris/vector-hybrid retrieval. Keep local for no-network deterministic demos;
+# use redis/auto when Redis Cloud/Stack with RediSearch is configured.
+# REDIS_URL is enough; component-specific Redis URLs are optional overrides.
 export ATTACK_KB_VECTOR_BACKEND=local # local | redis | auto
 export ATTACK_KB_EMBEDDING_PROVIDER=deterministic
 export ATTACK_KB_VECTOR_INDEX=attack-kb-vector

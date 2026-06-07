@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import { connect as connectTls, type TLSSocket } from "node:tls";
 
+import { readAttackKbRedisConnectionConfig } from "../redis/client.js";
+
 export const ATTACK_KB_LLM_CACHE_TASK_SCOPES = [
   "source-triage",
   "curation-review",
@@ -302,8 +304,8 @@ async function wrapWithCache<T>(
 function buildUnsupportedRedisCacheError(config: AttackKbLlmCacheConfig): Error {
   return new Error(
     [
-      "Attack KB Redis LLM cache is enabled but ATTACK_KB_REDIS_CACHE_URL is not set or Redis is unavailable.",
-      "Set ATTACK_KB_REDIS_CACHE_FALLBACK=local to fail open, or ATTACK_KB_LLM_CACHE=disabled to bypass the cache.",
+      "Attack KB Redis LLM cache is enabled but no Redis URL is set or Redis is unavailable.",
+      "Set REDIS_URL or ATTACK_KB_REDIS_CACHE_URL. Set ATTACK_KB_REDIS_CACHE_FALLBACK=local to fail open, or ATTACK_KB_LLM_CACHE=disabled to bypass the cache.",
       `keyPrefix=${config.redis.keyPrefix}`,
     ].join(" "),
   );
@@ -322,11 +324,13 @@ function warnRedisFallback(reason: unknown): void {
 }
 
 export function getAttackKbLlmCacheConfig(): AttackKbLlmCacheConfig {
+  const redisConnection = readAttackKbRedisConnectionConfig();
+
   return {
     provider: parseCacheProvider(env("ATTACK_KB_LLM_CACHE")),
     ttlSeconds: parsePositiveIntegerEnv("ATTACK_KB_LLM_CACHE_TTL_SECONDS", DEFAULT_CACHE_TTL_SECONDS),
     redis: {
-      url: env("ATTACK_KB_REDIS_CACHE_URL"),
+      url: env("ATTACK_KB_REDIS_CACHE_URL") || redisConnection.url,
       keyPrefix: normalizeKeyPrefix(env("ATTACK_KB_REDIS_CACHE_KEY_PREFIX") || DEFAULT_REDIS_KEY_PREFIX),
       fallbackToLocal: parseRedisFallback(env("ATTACK_KB_REDIS_CACHE_FALLBACK")),
       timeoutMs: parsePositiveIntegerEnv("ATTACK_KB_REDIS_CACHE_TIMEOUT_MS", DEFAULT_REDIS_TIMEOUT_MS),

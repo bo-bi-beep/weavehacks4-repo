@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { getAttackKbRecommendations } from "./recommendations.js";
+import { closeDefaultAttackKbStorageAdapter } from "./storage/index.js";
 import type { AgentUnderTestProfile } from "./types.js";
 
 const richCreditLoanProfile: AgentUnderTestProfile = {
@@ -39,4 +40,8 @@ const profile: AgentUnderTestProfile = rawArgs.includes("--rich-credit-loan")
     ? (JSON.parse(rawProfile) as AgentUnderTestProfile)
     : { domain: "credit_loan" };
 
-console.log(JSON.stringify(await getAttackKbRecommendations(profile), null, 2));
+try {
+  console.log(JSON.stringify(await getAttackKbRecommendations(profile), null, 2));
+} finally {
+  await closeDefaultAttackKbStorageAdapter();
+}

@@ -32,11 +32,11 @@ Each Attack KB role can use a different model:
 
 ```bash
 ATTACK_KB_LLM_PROVIDER=openai
-ATTACK_KB_SOURCE_DISCOVERY_MODEL=gpt-4.1-mini
-ATTACK_KB_SOURCE_RETRIEVAL_MODEL=gpt-4.1-mini
-ATTACK_KB_CREDIBILITY_TRIAGE_MODEL=gpt-4.1
-ATTACK_KB_CURATOR_MODEL=gpt-4.1
-ATTACK_KB_RECOMMENDER_MODEL=gpt-4.1
+ATTACK_KB_SOURCE_DISCOVERY_MODEL=gpt-5.4-mini
+ATTACK_KB_SOURCE_RETRIEVAL_MODEL=gpt-5.4-mini
+ATTACK_KB_CREDIBILITY_TRIAGE_MODEL=gpt-5.5
+ATTACK_KB_CURATOR_MODEL=gpt-5.5
+ATTACK_KB_RECOMMENDER_MODEL=gpt-5.5
 ```
 
 ## LLM semantic-cache seam
@@ -125,12 +125,12 @@ ATTACK_KB_STORAGE_ADAPTER=json
 ATTACK_KB_LOCAL_STORAGE_PATH=attack-kb/.local/kb.json
 ```
 
-Redis-backed storage uses the official `redis` npm client. Prefer a Redis Cloud compatible URL (`rediss://...` when TLS is required). `ATTACK_KB_REDIS_IRIS_URL` is kept for the original adapter naming and takes precedence over `REDIS_URL`; `ATTACK_KB_STORAGE_ADAPTER=redis` and `redis-iris` both select the Redis path.
+Redis-backed storage uses the official `redis` npm client. Prefer a Redis Cloud compatible URL (`rediss://...` when TLS is required). `REDIS_URL` is the canonical Redis connection string and is enough for storage/Iris, vector retrieval, memory, and cache. `ATTACK_KB_REDIS_IRIS_URL` is an optional storage/Iris override only; `ATTACK_KB_STORAGE_ADAPTER=redis` and `redis-iris` both select the Redis path.
 
 ```bash
 ATTACK_KB_STORAGE_ADAPTER=redis-iris # or redis
-REDIS_URL=redis://localhost:6379
-# ATTACK_KB_REDIS_IRIS_URL=rediss://default:<password>@your-redis-cloud-host:port
+REDIS_URL=rediss://default:<password>@your-redis-cloud-host:port
+# ATTACK_KB_REDIS_IRIS_URL= # optional override; leave blank to use REDIS_URL
 ATTACK_KB_REDIS_IRIS_INDEX=attack-kb-objects
 ATTACK_KB_REDIS_IRIS_NAMESPACE=attack-kb
 ATTACK_KB_REDIS_IRIS_FALLBACK=local # local/true/1, or disabled/false/0
@@ -151,9 +151,11 @@ npm run attack-kb:redis-smoke
 
 The smoke command writes the canonical seed objects through Redis and reads one back; it requires `REDIS_URL` or `ATTACK_KB_REDIS_IRIS_URL` and does not use the local fallback.
 
-## Vector/hybrid retrieval
+## Main-agent Iris / vector-hybrid retrieval
 
-`attack-kb/src/retrieval/` exposes `searchAttackKbSemanticContext(query, filters, options)` for semantic context lookup over canonical KB objects. It materializes object text from titles, descriptions, tags, payload fields, provenance/evidence, domain scenarios, business routes, system patterns, curation outcomes, and success signals; then chunks that text for retrieval.
+`attack-kb/src/retrieval/` exposes `searchAttackKbSemanticContext(query, filters, options)` for semantic context lookup over canonical KB objects. This is P0 for the main Attack KB recommendation path: `getAttackKbRecommendations()` retrieves main-agent context and returns it in `response.retrievedContext`, then uses that context to rerank probing or attack-route recommendations. Subagent context-query and spawn-spec generation remain P1.
+
+The retrieval layer materializes object text from titles, descriptions, tags, payload fields, provenance/evidence, domain scenarios, business routes, system patterns, curation outcomes, and success signals; then chunks that text for retrieval.
 
 Default retrieval is deterministic and local: `ATTACK_KB_EMBEDDING_PROVIDER=deterministic` hashes tokens into a configurable `Float32Array` dimension (default `384`) and reranks chunks with a vector score plus a lexical overlap score. It makes no OpenAI calls and works without Redis.
 
@@ -161,7 +163,7 @@ Redis mode is opt-in. It stores retrieval chunks as Redis hashes under `<ATTACK_
 
 ```bash
 ATTACK_KB_VECTOR_BACKEND=redis # local | redis | auto
-ATTACK_KB_VECTOR_REDIS_URL=redis://localhost:6379 # optional; otherwise reuses ATTACK_KB_REDIS_IRIS_URL/REDIS_URL
+ATTACK_KB_VECTOR_REDIS_URL= # optional override; leave blank to use REDIS_URL
 ATTACK_KB_VECTOR_INDEX=attack-kb-vector
 ATTACK_KB_VECTOR_KEY_PREFIX=attack-kb:vector
 ATTACK_KB_VECTOR_INDEX_ALGORITHM=HNSW # or FLAT
@@ -186,7 +188,7 @@ const context = await searchAttackKbSemanticContext(
 );
 ```
 
-Deferred work: production OpenAI embeddings through the traced Attack KB runtime, batch embedding refresh/invalidation, Redis Context Retriever/Iris service integration, and recommendation-builder ranking integration.
+Current P0 main-agent behavior: the recommendation path retrieves Iris/vector context, exposes retrieved refs in `AttackKbResponse.retrievedContext`, and reranks recommendations by retrieved context scores. Deferred work: production OpenAI embeddings through the traced Attack KB runtime, batch embedding refresh/invalidation, richer sponsor-specific Iris SDK integration if required, and P1 governed subagent context-query/spawn-spec generation.
 
 ## Agent Memory adapter
 
@@ -202,13 +204,13 @@ Default memory config uses an in-process local fallback. Set a Redis URL to pers
 
 ```bash
 ATTACK_KB_MEMORY_ADAPTER=auto # auto, local, or redis
-ATTACK_KB_MEMORY_REDIS_URL=redis://localhost:6379
+ATTACK_KB_MEMORY_REDIS_URL= # optional override; leave blank to use REDIS_URL
 ATTACK_KB_MEMORY_REDIS_PREFIX=attack-kb:memory
 ATTACK_KB_MEMORY_REDIS_FALLBACK=local # or disabled
 ATTACK_KB_MEMORY_REDIS_TIMEOUT_MS=1500
 ```
 
-If `ATTACK_KB_MEMORY_REDIS_URL` is unset, auto mode reuses `ATTACK_KB_REDIS_IRIS_URL` when present; otherwise it stays local-memory. Redis keys use:
+If `ATTACK_KB_MEMORY_REDIS_URL` is unset, auto mode reuses `REDIS_URL`/`ATTACK_KB_REDIS_IRIS_URL` when present; otherwise it stays local-memory. Redis keys use:
 
 ```text
 <prefix>:record:<namespace>:<id>
@@ -216,7 +218,7 @@ If `ATTACK_KB_MEMORY_REDIS_URL` is unset, auto mode reuses `ATTACK_KB_REDIS_IRIS
 <prefix>:recent:all
 ```
 
-This is a Redis key-value Agent Memory seam, not a final Redis Iris/Agent Memory service SDK integration. If the sponsor service exposes a different API, replace the implementation behind `AttackKbMemoryAdapter` without changing the recommendation/demo call sites.
+This is a Redis key-value Agent Memory seam. If a sponsor-specific Iris/Agent Memory SDK exposes a different API, replace the implementation behind `AttackKbMemoryAdapter` without changing the recommendation/demo call sites.
 
 Redis observability/security guidance lives in [`docs/redis-observability-security.md`](docs/redis-observability-security.md). The safe report command prints sanitized config and intended Redis names without contacting Redis unless `ATTACK_KB_REDIS_HEALTH_CONNECT=1` is set:
 

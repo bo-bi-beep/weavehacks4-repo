@@ -6,6 +6,7 @@ import { ingestAttackKbDataItem, ingestAttackKbSource } from "../src/ingestion/i
 import { recordAttackKbEvent } from "../src/redis/streams.js";
 import { buildSampleMaestroDataItem, sampleOwaspAgenticSource } from "../src/ingestion/sample.js";
 import { getAttackKbRecommendations } from "../src/recommendations.js";
+import { closeDefaultAttackKbStorageAdapter } from "../src/storage/index.js";
 import type { AgentUnderTestProfile, AttackKbResponse } from "../src/types.js";
 
 type TraceState = "enabled" | "disabled_missing_wandb_api_key";
@@ -96,6 +97,16 @@ async function evaluateEmptyProfileRecommendation(trace: TraceState): Promise<Ev
         response.recommendations.every((recommendation) => recommendation.domainDecisionFactorRefs.length > 0),
         "Probing recommendations should point back to domain decision factors.",
       ),
+      score(
+        "main_iris_context_retrieved",
+        Boolean(response.retrievedContext?.refs.length),
+        "Main-agent recommendation path should retrieve Iris/context refs in P0.",
+      ),
+      score(
+        "subagent_context_retrieval_not_used",
+        response.retrievedContext?.p1SubagentContextRetrieval === false,
+        "Subagent context retrieval/spawn-spec generation remains P1 and should not be used in this main-agent response.",
+      ),
     ],
     summary: summarizeResponse(response),
   };
@@ -170,6 +181,16 @@ async function evaluateRichProfileRecommendation(trace: TraceState): Promise<Eva
         response.kbRefs.some((ref) => ref.type === "BusinessAttackRoute") &&
           response.kbRefs.some((ref) => ref.type === "DomainScenario"),
         "Response refs should include domain scenarios and business routes.",
+      ),
+      score(
+        "main_iris_context_retrieved",
+        Boolean(response.retrievedContext?.refs.length),
+        "Main-agent attack recommendation path should retrieve Iris/context refs in P0.",
+      ),
+      score(
+        "subagent_context_retrieval_not_used",
+        response.retrievedContext?.p1SubagentContextRetrieval === false,
+        "Subagent context retrieval/spawn-spec generation remains P1 and should not be used in this main-agent response.",
       ),
     ],
     summary: summarizeResponse(response),
@@ -252,6 +273,14 @@ function summarizeResponse(response: AttackKbResponse): Record<string, unknown> 
     recommendations: response.recommendations.length,
     missingInfo: response.missingInfo.map((item) => item.key),
     kbRefs: response.kbRefs.length,
+    retrievedContext: response.retrievedContext
+      ? {
+          backend: response.retrievedContext.backend,
+          resultCount: response.retrievedContext.resultCount,
+          indexName: response.retrievedContext.indexName,
+          p1SubagentContextRetrieval: response.retrievedContext.p1SubagentContextRetrieval,
+        }
+      : undefined,
     firstRecommendation: response.recommendations[0]
       ? {
           id: response.recommendations[0].id,
@@ -296,20 +325,24 @@ async function runEvalSuite(): Promise<EvalRunResult> {
   };
 }
 
-const result = await runEvalSuite();
-await recordAttackKbEvent({
-  type: "eval_run_completed",
-  source: "attack-kb.evals",
-  timestamp: result.generatedAt,
-  payload: {
-    ok: result.ok,
-    trace: result.trace,
-    totals: result.totals,
-    caseIds: result.cases.map((item) => item.id),
-  },
-});
-console.log(JSON.stringify(result, null, 2));
+try {
+  const result = await runEvalSuite();
+  await recordAttackKbEvent({
+    type: "eval_run_completed",
+    source: "attack-kb.evals",
+    timestamp: result.generatedAt,
+    payload: {
+      ok: result.ok,
+      trace: result.trace,
+      totals: result.totals,
+      caseIds: result.cases.map((item) => item.id),
+    },
+  });
+  console.log(JSON.stringify(result, null, 2));
 
-if (!result.ok) {
-  process.exitCode = 1;
+  if (!result.ok) {
+    process.exitCode = 1;
+  }
+} finally {
+  await closeDefaultAttackKbStorageAdapter();
 }

@@ -227,18 +227,35 @@ function redisBulkString(value: unknown): string | undefined {
 }
 
 function parseSearchReply(reply: unknown, objectKeyPrefix: string): AttackKbRedisSearchResult {
-  if (!Array.isArray(reply)) {
-    throw new Error(`Unexpected FT.SEARCH reply: ${typeof reply}`);
+  if (Array.isArray(reply)) {
+    const total = redisSearchTotal(reply[0]);
+    const ids = reply
+      .slice(1)
+      .map(redisBulkString)
+      .filter((key): key is string => Boolean(key?.startsWith(objectKeyPrefix)))
+      .map((key) => key.slice(objectKeyPrefix.length));
+
+    return { total, ids };
   }
 
-  const total = redisSearchTotal(reply[0]);
-  const ids = reply
-    .slice(1)
-    .map(redisBulkString)
-    .filter((key): key is string => Boolean(key?.startsWith(objectKeyPrefix)))
-    .map((key) => key.slice(objectKeyPrefix.length));
+  if (reply && typeof reply === "object") {
+    const response = reply as {
+      total_results?: unknown;
+      totalResults?: unknown;
+      results?: Array<{ id?: unknown }>;
+    };
+    const ids = (response.results ?? [])
+      .map((result) => redisBulkString(result.id))
+      .filter((key): key is string => Boolean(key?.startsWith(objectKeyPrefix)))
+      .map((key) => key.slice(objectKeyPrefix.length));
 
-  return { total, ids };
+    return {
+      total: redisSearchTotal(response.total_results ?? response.totalResults ?? ids.length),
+      ids,
+    };
+  }
+
+  throw new Error(`Unexpected FT.SEARCH reply: ${typeof reply}`);
 }
 
 async function searchOnce(

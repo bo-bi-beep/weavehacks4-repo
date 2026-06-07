@@ -346,6 +346,7 @@ const report = {
     existingStorage: [
       "ATTACK_KB_STORAGE_ADAPTER",
       "ATTACK_KB_LOCAL_STORAGE_PATH",
+      "REDIS_URL",
       "ATTACK_KB_REDIS_IRIS_URL",
       "ATTACK_KB_REDIS_IRIS_INDEX",
       "ATTACK_KB_REDIS_IRIS_NAMESPACE",
@@ -353,7 +354,7 @@ const report = {
     ],
     vectorRetrieval: [
       "ATTACK_KB_VECTOR_BACKEND",
-      "ATTACK_KB_VECTOR_REDIS_URL",
+      "ATTACK_KB_VECTOR_REDIS_URL", "# optional override; defaults to REDIS_URL/ATTACK_KB_REDIS_IRIS_URL",
       "ATTACK_KB_VECTOR_INDEX",
       "ATTACK_KB_VECTOR_KEY_PREFIX",
       "ATTACK_KB_VECTOR_INDEX_ALGORITHM",
@@ -365,6 +366,18 @@ const report = {
       "ATTACK_KB_VECTOR_DETERMINISTIC_SEED",
       "ATTACK_KB_OPENAI_EMBEDDING_MODEL",
     ],
+    memoryAndCache: [
+      "ATTACK_KB_MEMORY_ADAPTER",
+      "ATTACK_KB_MEMORY_REDIS_URL", "# optional override; defaults to REDIS_URL/ATTACK_KB_REDIS_IRIS_URL",
+      "ATTACK_KB_MEMORY_REDIS_PREFIX",
+      "ATTACK_KB_MEMORY_REDIS_FALLBACK",
+      "ATTACK_KB_MEMORY_REDIS_TIMEOUT_MS",
+      "ATTACK_KB_LLM_CACHE",
+      "ATTACK_KB_REDIS_CACHE_URL", "# optional override; defaults to REDIS_URL/ATTACK_KB_REDIS_IRIS_URL",
+      "ATTACK_KB_REDIS_CACHE_KEY_PREFIX",
+      "ATTACK_KB_REDIS_CACHE_FALLBACK",
+      "ATTACK_KB_REDIS_CACHE_TIMEOUT_MS",
+    ],
     reportingOnly: [
       "ATTACK_KB_REDIS_KEY_PREFIX",
       "ATTACK_KB_REDIS_EVENTS_STREAM",
@@ -375,7 +388,7 @@ const report = {
   },
   adapterIntegration: {
     storageBoundary: "attack-kb/src/storage/redis-iris.ts implements Redis behind AttackKbStorageAdapter.",
-    currentBehavior: "This command does not instantiate the Redis storage adapter and does not require Redis reachability unless ATTACK_KB_REDIS_HEALTH_CONNECT=1. The adapter best-effort creates the FT.CREATE JSON index when RedisJSON and Query Engine/RediSearch are available.",
+    currentBehavior: "This command does not instantiate the Redis storage adapter and does not require Redis reachability unless ATTACK_KB_REDIS_HEALTH_CONNECT=1. The adapter best-effort creates the FT.CREATE JSON index when RedisJSON and Query Engine/RediSearch are available. REDIS_URL is sufficient for storage/Iris, vector retrieval, memory, and cache unless a component-specific URL override is set.",
   },
 };
 

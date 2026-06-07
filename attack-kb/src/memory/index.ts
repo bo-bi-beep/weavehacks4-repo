@@ -3,6 +3,7 @@ import net from "node:net";
 import tls from "node:tls";
 import { URL } from "node:url";
 
+import { readAttackKbRedisConnectionConfig } from "../redis/client.js";
 import type {
   AttackKbMemoryAdapter,
   AttackKbMemoryNamespace,
@@ -104,11 +105,12 @@ function normalizeKeyPrefix(prefix: string | undefined): string {
 
 export function getAttackKbMemoryConfig(): AttackKbMemoryConfig {
   const redisIrisNamespace = env("ATTACK_KB_REDIS_IRIS_NAMESPACE") || "attack-kb";
+  const redisConnection = readAttackKbRedisConnectionConfig();
 
   return {
     provider: parseProvider(env("ATTACK_KB_MEMORY_ADAPTER")),
     redis: {
-      url: env("ATTACK_KB_MEMORY_REDIS_URL") || env("ATTACK_KB_REDIS_IRIS_URL"),
+      url: env("ATTACK_KB_MEMORY_REDIS_URL") || redisConnection.url,
       keyPrefix: normalizeKeyPrefix(env("ATTACK_KB_MEMORY_REDIS_PREFIX") || `${redisIrisNamespace}:memory`),
       fallbackToLocal: parseFallback(env("ATTACK_KB_MEMORY_REDIS_FALLBACK")),
       timeoutMs: parseTimeoutMs(env("ATTACK_KB_MEMORY_REDIS_TIMEOUT_MS")),

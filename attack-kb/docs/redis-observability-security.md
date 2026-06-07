@@ -1,6 +1,6 @@
 # Redis observability and security for Attack KB
 
-This is the P0 Redis runbook for the Attack KB storage slice. It keeps Redis setup, reporting, and security guidance visible without giving live sandbox subagents direct access to Redis credentials.
+This is the P0 Redis/Iris runbook for Attack KB storage plus main-agent context retrieval. It keeps Redis setup, reporting, and security guidance visible without giving live sandbox subagents direct access to Redis credentials. Main-agent Iris/context retrieval is P0; governed subagent context-query and spawn-spec generation remain P1.
 
 ## Configuration baseline
 
@@ -9,14 +9,18 @@ Use Redis Cloud or a local Redis Stack instance for the Redis-backed adapter. Lo
 Recommended env shape:
 
 ```bash
+REDIS_URL=rediss://attack-kb-app:<password>@<host>:<port>/0
 ATTACK_KB_STORAGE_ADAPTER=redis-iris
-ATTACK_KB_REDIS_IRIS_URL=rediss://attack-kb-app:<password>@<host>:<port>/0
+# ATTACK_KB_REDIS_IRIS_URL is optional; leave blank unless storage/Iris needs a different Redis database.
+ATTACK_KB_REDIS_IRIS_URL=
 ATTACK_KB_REDIS_IRIS_INDEX=attack-kb-objects
 ATTACK_KB_REDIS_IRIS_NAMESPACE=attack-kb
 ATTACK_KB_REDIS_IRIS_FALLBACK=local
 
-# Optional vector/hybrid retrieval index
+# P0 main-agent Iris/vector-hybrid retrieval index
 ATTACK_KB_VECTOR_BACKEND=redis
+# ATTACK_KB_VECTOR_REDIS_URL is optional; leave blank to use REDIS_URL.
+ATTACK_KB_VECTOR_REDIS_URL=
 ATTACK_KB_VECTOR_INDEX=attack-kb-vector
 ATTACK_KB_VECTOR_KEY_PREFIX=attack-kb:vector
 ATTACK_KB_VECTOR_INDEX_ALGORITHM=HNSW
@@ -32,6 +36,7 @@ ATTACK_KB_REDIS_CURATION_STREAM=attack-kb:curation:events
 Guidance:
 
 - Prefer `rediss://` for Redis Cloud and any non-local deployment so TLS is on by default.
+- Use `REDIS_URL` as the canonical Redis connection. Component-specific URL variables (`ATTACK_KB_REDIS_IRIS_URL`, `ATTACK_KB_VECTOR_REDIS_URL`, `ATTACK_KB_MEMORY_REDIS_URL`, `ATTACK_KB_REDIS_CACHE_URL`) are optional overrides, not required duplicates.
 - Keep real credentials only in local `.env`, deployment secrets, or the final secret manager. Never commit credentials and never paste them into agent chat.
 - Use an ACL user such as `attack-kb-app`, not the default/admin user, for the application client.
 - Keep object keys scoped under `ATTACK_KB_REDIS_IRIS_NAMESPACE`/`ATTACK_KB_REDIS_IRIS_INDEX` and stream keys under `ATTACK_KB_REDIS_KEY_PREFIX` so cleanup and ACL patterns can target `attack-kb:*` without touching unrelated Redis data.
@@ -74,10 +79,10 @@ Use these during final integration or when diagnosing Redis behavior. Capture sa
 ### Redis server health
 
 ```bash
-redis-cli --tls -u "$ATTACK_KB_REDIS_IRIS_URL" INFO server
-redis-cli --tls -u "$ATTACK_KB_REDIS_IRIS_URL" INFO memory
-redis-cli --tls -u "$ATTACK_KB_REDIS_IRIS_URL" INFO stats
-redis-cli --tls -u "$ATTACK_KB_REDIS_IRIS_URL" INFO commandstats
+redis-cli --tls -u "$REDIS_URL" INFO server
+redis-cli --tls -u "$REDIS_URL" INFO memory
+redis-cli --tls -u "$REDIS_URL" INFO stats
+redis-cli --tls -u "$REDIS_URL" INFO commandstats
 ```
 
 Look for connected clients, memory pressure, evictions, rejected connections, command latency, and module availability.
@@ -85,7 +90,7 @@ Look for connected clients, memory pressure, evictions, rejected connections, co
 ### Slow operations
 
 ```bash
-redis-cli --tls -u "$ATTACK_KB_REDIS_IRIS_URL" SLOWLOG GET 20
+redis-cli --tls -u "$REDIS_URL" SLOWLOG GET 20
 ```
 
 Use this to catch expensive index queries or accidental scans. Keep the output sanitized because arguments may include KB text.
@@ -93,7 +98,7 @@ Use this to catch expensive index queries or accidental scans. Keep the output s
 ### Memory diagnostics
 
 ```bash
-redis-cli --tls -u "$ATTACK_KB_REDIS_IRIS_URL" MEMORY DOCTOR
+redis-cli --tls -u "$REDIS_URL" MEMORY DOCTOR
 ```
 
 Use `MEMORY DOCTOR` for a plain-English check on fragmentation and memory pressure before the final demo.
@@ -101,9 +106,9 @@ Use `MEMORY DOCTOR` for a plain-English check on fragmentation and memory pressu
 ### Search/index diagnostics
 
 ```bash
-redis-cli --tls -u "$ATTACK_KB_REDIS_IRIS_URL" FT.INFO "$ATTACK_KB_REDIS_IRIS_INDEX"
-redis-cli --tls -u "$ATTACK_KB_REDIS_IRIS_URL" FT.INFO "$ATTACK_KB_VECTOR_INDEX"
-redis-cli --tls -u "$ATTACK_KB_REDIS_IRIS_URL" FT.PROFILE "$ATTACK_KB_VECTOR_INDEX" SEARCH QUERY '*=>[KNN 5 @embedding $query_vector AS vector_distance]' PARAMS 2 query_vector '<FLOAT32_BLOB>' SORTBY vector_distance ASC DIALECT 2
+redis-cli --tls -u "$REDIS_URL" FT.INFO "$ATTACK_KB_REDIS_IRIS_INDEX"
+redis-cli --tls -u "$REDIS_URL" FT.INFO "$ATTACK_KB_VECTOR_INDEX"
+redis-cli --tls -u "$REDIS_URL" FT.PROFILE "$ATTACK_KB_VECTOR_INDEX" SEARCH QUERY '*=>[KNN 5 @embedding $query_vector AS vector_distance]' PARAMS 2 query_vector '<FLOAT32_BLOB>' SORTBY vector_distance ASC DIALECT 2
 ```
 
 `FT.INFO` should show document count, indexing status, and index memory. `FT.PROFILE` should be used with a tiny synthetic/safe query during final integration so the report can show query shape and timing without leaking payloads.
@@ -135,7 +140,7 @@ To add a minimal network readiness check, opt in explicitly:
 ATTACK_KB_REDIS_HEALTH_CONNECT=1 npm run attack-kb:redis-health
 ```
 
-That mode uses `ATTACK_KB_REDIS_IRIS_URL` (or `REDIS_URL` if the Iris URL is unset) only to perform `AUTH` when credentials are embedded in the URL, optional `SELECT` for the URL database path, and `PING`. It does not run `INFO`, `SLOWLOG`, `MEMORY DOCTOR`, `FT.INFO`, or `FT.PROFILE`; those remain manual/final-integration diagnostics.
+That mode uses `REDIS_URL` unless `ATTACK_KB_REDIS_IRIS_URL` overrides it, only to perform `AUTH` when credentials are embedded in the URL, optional `SELECT` for the URL database path, and `PING`. It does not run `INFO`, `SLOWLOG`, `MEMORY DOCTOR`, `FT.INFO`, or `FT.PROFILE`; those remain manual/final-integration diagnostics.
 
 ## Final integration smoke/report approach
 
@@ -146,10 +151,11 @@ At final integration:
 1. Run `npm run attack-kb:redis-health` and save the sanitized report.
 2. Run `ATTACK_KB_REDIS_HEALTH_CONNECT=1 npm run attack-kb:redis-health` to confirm TLS/auth/PING reachability.
 3. Write/read one synthetic canonical object under the scoped prefix and confirm the recommendation path still uses the `AttackKbStorageAdapter` boundary.
-4. Capture sanitized `INFO`, `SLOWLOG GET 20`, `MEMORY DOCTOR`, `FT.INFO`, and one tiny `FT.PROFILE` result.
-5. Capture the W&B Weave trace link for the final demo flow and note whether Redis fallback was disabled or enabled.
-6. Include a short report section: Redis endpoint sanitized, ACL user role, key prefix, index name, stream names, doc count, slowlog summary, memory status, and open risks.
+4. Run a main-agent recommendation request and confirm `AttackKbResponse.retrievedContext.usedFor === "main_agent_recommendation"`, `retrievedContext.backend === "redis"`, and `retrievedContext.p1SubagentContextRetrieval === false`.
+5. Capture sanitized `INFO`, `SLOWLOG GET 20`, `MEMORY DOCTOR`, `FT.INFO`, and one tiny `FT.PROFILE` result.
+6. Capture the W&B Weave trace link for the final demo flow and note whether Redis fallback was disabled or enabled.
+7. Include a short report section: Redis endpoint sanitized, ACL user role, key prefix, index name, vector index name, main-agent retrieved context count, stream names, doc count, slowlog summary, memory status, and open risks.
 
 ## Current adapter integration
 
-Current code keeps Redis Iris as an adapter boundary in `attack-kb/src/storage/redis-iris.ts`. The health/report script does not instantiate the Redis storage adapter and remains safe to run in report-only mode. The adapter uses the same env vars, logical names, and sanitization rules behind `AttackKbStorageAdapter` without changing the main recommendation flow.
+Current code keeps Redis Iris as an adapter boundary in `attack-kb/src/storage/redis-iris.ts` and as the P0 main-agent context retrieval path in `attack-kb/src/retrieval/semantic.ts` + `attack-kb/src/recommendations.ts`. The health/report script does not instantiate the Redis storage adapter and remains safe to run in report-only mode. The recommendation path retrieves context for the main agent, exposes it as `AttackKbResponse.retrievedContext`, and keeps subagent context retrieval/spawn specs out of P0.

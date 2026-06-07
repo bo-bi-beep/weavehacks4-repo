@@ -131,6 +131,7 @@ export type AttackKbRunMemory = {
   recommendationIds: string[];
   missingInfoKeys: string[];
   kbRefIds: string[];
+  retrievedContextRefIds?: string[];
   directAutContactByAttackKb: false;
   safeSyntheticOnly: true;
 };
@@ -484,6 +485,28 @@ export type AttackKbRef = {
   >;
 };
 
+export type AttackKbRetrievedContextRef = {
+  id: string;
+  storageType: AttackKbStorageObjectType;
+  title: string;
+  score: number;
+  backend: "local" | "redis";
+  chunkId: string;
+  textPreview: string;
+};
+
+export type AttackKbRetrievedContext = {
+  usedFor: "main_agent_recommendation";
+  p1SubagentContextRetrieval: false;
+  query: string;
+  backend: "local" | "redis";
+  generatedAt: string;
+  resultCount: number;
+  indexName?: string;
+  keyPrefix?: string;
+  refs: AttackKbRetrievedContextRef[];
+};
+
 export type AttackKbResponse = {
   requestId: string;
   generatedAt: string;
@@ -493,4 +516,5 @@ export type AttackKbResponse = {
   missingInfo: MissingInfo[];
   recommendations: AttackRecommendation[];
   kbRefs: AttackKbRef[];
+  retrievedContext?: AttackKbRetrievedContext;
 };

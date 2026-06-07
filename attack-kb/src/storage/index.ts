@@ -157,6 +157,12 @@ export function getDefaultAttackKbStorageAdapter(): AttackKbStorageAdapter {
   return defaultAdapter;
 }
 
+export async function closeDefaultAttackKbStorageAdapter(): Promise<void> {
+  const adapter = defaultAdapter;
+  defaultAdapter = undefined;
+  await adapter?.close?.();
+}
+
 export function resetDefaultAttackKbStorageAdapterForTests(): void {
   defaultAdapter = undefined;
 }

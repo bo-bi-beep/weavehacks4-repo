@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { closeDefaultAttackKbStorageAdapter } from "../storage/index.js";
 import { buildAttackKbMainAgentDemoFlow } from "./flow.js";
 import { createAttackKbDemoServer } from "./server.js";
 
@@ -67,4 +68,5 @@ try {
       resolve();
     }),
   );
+  await closeDefaultAttackKbStorageAdapter();
 }

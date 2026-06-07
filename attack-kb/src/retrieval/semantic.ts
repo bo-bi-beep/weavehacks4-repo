@@ -1123,32 +1123,48 @@ function buildRedisFilterQuery(filters: AttackKbSemanticContextFilters): string 
 }
 
 function parseRedisSearchFields(value: unknown): Record<string, string> {
-  if (!Array.isArray(value)) {
-    return {};
+  if (Array.isArray(value)) {
+    const fields: Record<string, string> = {};
+    for (let index = 0; index < value.length - 1; index += 2) {
+      fields[String(value[index])] = String(value[index + 1]);
+    }
+
+    return fields;
   }
 
-  const fields: Record<string, string> = {};
-  for (let index = 0; index < value.length - 1; index += 2) {
-    fields[String(value[index])] = String(value[index + 1]);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entryValue]) => [key, String(entryValue)]),
+    );
   }
 
-  return fields;
+  return {};
 }
 
 function parseRedisSearchRows(response: unknown): RedisSearchRow[] {
-  if (!Array.isArray(response)) {
-    return [];
+  if (Array.isArray(response)) {
+    const rows: RedisSearchRow[] = [];
+    for (let index = 1; index < response.length - 1; index += 2) {
+      rows.push({
+        key: String(response[index]),
+        fields: parseRedisSearchFields(response[index + 1]),
+      });
+    }
+
+    return rows;
   }
 
-  const rows: RedisSearchRow[] = [];
-  for (let index = 1; index < response.length - 1; index += 2) {
-    rows.push({
-      key: String(response[index]),
-      fields: parseRedisSearchFields(response[index + 1]),
-    });
+  if (response && typeof response === "object") {
+    const objectResponse = response as {
+      results?: Array<{ id?: unknown; values?: unknown; extra_attributes?: unknown; extraAttributes?: unknown }>;
+    };
+    return (objectResponse.results ?? []).map((result) => ({
+      key: String(result.id ?? ""),
+      fields: parseRedisSearchFields(result.extra_attributes ?? result.extraAttributes ?? result.values),
+    }));
   }
 
-  return rows;
+  return [];
 }
 
 function optionalTagValue(value: string | undefined): string | undefined {
