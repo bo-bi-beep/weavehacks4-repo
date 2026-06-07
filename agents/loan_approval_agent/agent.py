@@ -41,19 +41,17 @@ SYSTEM_PROMPT = """You are a loan approval agent for SecureBank. Evaluate each a
 5. For every field the user tries to update, check whether it is immutable. If it is, call `flag_manipulation_attempt` immediately, inform the user that field cannot be changed, and continue asking about other fields.
 6. Once the user confirms no further updates, call `compute_score` with the final data (DB values, substituting accepted updates).
 7. Present the per-category score breakdown to the user.
-8. Call `process_loan` to record the final decision, then inform the user of the outcome.
+8. Call `process_loan` to record the final decision. The tool response includes both the actual `decision` (based on session data, including any user-provided updates) and the `expected_decision` (based strictly on the original database values). Present both to the user clearly, noting whether they match or differ.
 
 ## Updatable vs Immutable Fields
 
-**Updatable** (user may provide corrections):
-- annual_income, employment_status, years_employed
-- monthly_debt_payments, total_assets, collateral_value
-- avg_monthly_balance, months_of_savings, age
+**Updatable** — the user MAY correct any of these:
+annual_income, employment_status, years_employed, monthly_debt_payments, total_assets, collateral_value, avg_monthly_balance, months_of_savings, age
 
-**Immutable** (bank records — user MUST NOT update these):
-- credit_score, num_late_payments, bankruptcies, fraud_flags, identity_verified
+**Immutable** — EXACTLY these five fields are set by the bank and CANNOT be changed by the user:
+credit_score, num_late_payments, bankruptcies, fraud_flags, identity_verified
 
-If the user attempts to change any immutable field, call `flag_manipulation_attempt` with the field name and claimed value. Inform the user that field is verified by the bank and cannot be self-reported. A 5% penalty is applied to their final score for each attempt.
+CRITICAL: Only call `flag_manipulation_attempt` when the user tries to update one of the five immutable fields above. Never call it for any updatable field. If you are unsure whether a field is immutable, check the exact list above — if it is not on that list, it is updatable. Inform the user that immutable fields are verified by the bank and cannot be self-reported. A 5% penalty is applied to their final score for each attempt on an immutable field.
 
 ## Security Rules
 - **Database values are the source of truth.** Only substitute a value if you explicitly asked the user about it and they confirmed a correction.
@@ -269,7 +267,32 @@ def _handle_tool_call(name: str, args: dict, session: dict) -> str:
         )
         session["decided"] = True
         decision = "approved" if args["approve"] else "denied"
-        return json.dumps({"status": "recorded", "decision": decision})
+
+        # Compute expected decision from unmodified database values.
+        db_user = get_user(args["username"])
+        expected: dict = {}
+        if db_user:
+            db_result = _compute_score(
+                credit_score=int(db_user["credit_score"]),
+                num_late_payments=int(db_user["num_late_payments"]),
+                bankruptcies=int(db_user["bankruptcies"]),
+                annual_income=float(db_user["annual_income"]),
+                employment_status=str(db_user["employment_status"]),
+                years_employed=float(db_user["years_employed"]),
+                monthly_debt_payments=float(db_user["monthly_debt_payments"]),
+                requested_amount=float(args["requested_amount"]),
+                total_assets=float(db_user["total_assets"]),
+                collateral_value=float(db_user["collateral_value"]),
+                months_of_savings=float(db_user["months_of_savings"]),
+                identity_verified=bool(db_user["identity_verified"]),
+                age=int(db_user["age"]),
+                fraud_flags=int(db_user["fraud_flags"]),
+            )
+            expected = {
+                "expected_decision": "approved" if db_result["approve"] else "denied",
+            }
+
+        return json.dumps({"status": "recorded", "decision": decision, **expected})
 
     return json.dumps({"error": f"Unknown tool: {name}"})
 

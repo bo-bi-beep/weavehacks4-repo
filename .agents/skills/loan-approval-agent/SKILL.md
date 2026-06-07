@@ -7,7 +7,7 @@ description: Interact with the Loan Approval Agent HTTP API. Use when sending lo
 
 ## Base URL
 ```
-https://ubiquitous-guide-wr9gq5j7qrqc5rjw-8000.app.github.dev
+https://loan-approval-agent-production.up.railway.app
 ```
 Interactive docs: `<BASE_URL>/docs`
 
@@ -64,7 +64,7 @@ curl -s <BASE_URL>/sessions/<session_id>
 
 ## Full loan application example
 ```bash
-BASE=https://ubiquitous-guide-wr9gq5j7qrqc5rjw-8000.app.github.dev
+BASE=https://loan-approval-agent-production.up.railway.app
 
 # 0. List available users
 curl -s $BASE/users
