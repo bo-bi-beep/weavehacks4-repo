@@ -40,7 +40,7 @@ const SKILL_SEARCH_DIRS = [".claude/skills", ".agents/skills"];
  * startup. Override with `MAIN_AGENT_SKILLS` (comma-separated; `none` or empty
  * to disable).
  */
-const DEFAULT_SKILLS = ["loan-approval-agent"];
+const DEFAULT_SKILLS = ["loan-approval-agent", "use-attack-kb"];
 
 /** A skill resolved to its mount path and contents. */
 interface LoadedSkill {

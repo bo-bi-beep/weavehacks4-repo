@@ -29,9 +29,11 @@ resolved from `.claude/skills/<name>/` or `.agents/skills/<name>/`, mounted at
 `skills/<name>/SKILL.md` in the sandbox, and referenced from the agent's
 instructions so the model reads it before acting.
 
-By default it loads the **`loan-approval-agent`** skill (how to drive the Loan
-Approval Agent HTTP API). Override the set with `MAIN_AGENT_SKILLS` — a
-comma-separated list of skill names, or `none`/empty to load nothing:
+By default it loads two skills: **`loan-approval-agent`** (how to drive the Loan
+Approval Agent HTTP API) and **`use-attack-kb`** (how to fetch an Attack KB
+recommendation packet from the KB server before attacking). Override the set with
+`MAIN_AGENT_SKILLS` — a comma-separated list of skill names, or `none`/empty to
+load nothing:
 
 ```bash
 # load two skills
@@ -144,7 +146,7 @@ defaults to `3000`, so the two don't collide).
 - `OPENAI_API_KEY` — required (model calls)
 - `MAIN_AGENT_MODEL` — optional, the Main Agent's model; defaults to `gpt-5.5` (OpenAI GPT-5.5)
 - `OPENAI_MODEL` — optional, the sub-agents' model; defaults to `gpt-5.4-mini`
-- `MAIN_AGENT_SKILLS` — optional, comma-separated skill names to load; defaults to `loan-approval-agent` (`none`/empty loads no skills)
+- `MAIN_AGENT_SKILLS` — optional, comma-separated skill names to load; defaults to `loan-approval-agent,use-attack-kb` (`none`/empty loads no skills)
 - `BL_API_KEY` — required (Blaxel sandbox auth)
 - `BL_WORKSPACE` — required (Blaxel workspace)
 - `BLAXEL_SANDBOX_IMAGE` — optional, defaults to `blaxel/base-image`
