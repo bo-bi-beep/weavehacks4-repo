@@ -60,8 +60,9 @@ recommended attack paths **directly** from the Attack KB server's
 replaces the former `use-attack-kb` skill, which read a `SKILL.md` and spawned a
 recommendation-fetcher sub-agent to make the same call.
 
-- The request body is copied verbatim from the `use-attack-kb` skill example
-  (`.agents/skills/use-attack-kb/SKILL.md` → the `credit_loan` profile + options).
+- The request body is the latest observed Loan Approval Agent profile (its
+  `credit_loan` tech stack, tools, policies, and highest-leverage decision
+  factors) plus the recommendation options.
 - The server URL comes from `ATTACK_KB_SERVER_URL`, defaulting to
   `http://127.0.0.1:3030` (start it with `npm run attack-kb:server`).
 - The packet is distilled to a concise briefing (per recommendation: id,
