@@ -11,6 +11,7 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - Sub-agents service in `agents/sub_agents/` — used both as an HTTP/SSE API (`npm run sub:agents`) and in-process as the main agent's sub-agent tools
 - Fix Agent in `agents/fix_agent/` — closes the red-team loop: takes the traces of a successful attack on the Loan Approval Agent and dispatches a **Cursor Cloud Agent** that opens a PR fixing `agents/loan_approval_agent/`, returning a fix summary + PR URL (`npm run fix:serve` for the HTTP service, `npm run fix:smoke` for a dry run). Weave-traced.
 - Attack KB subsystem under `attack-kb/`, with Redis-backed retrieval, Blaxel recommendationBuilder, and W&B Weave tracing
+- Replay-first CopilotKit + Weave demo dashboard in `apps/demo-dashboard/` (`npm run dashboard:dev`)
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
 - Agent setup docs in `docs/agent-setup.md`
@@ -31,10 +32,9 @@ npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 npm run dev -- "help me turn inbox triage into a weekend demo"
 ```
 
-Python red-team demo:
+Dashboard demo:
 ```bash
-python3.10 -m pip install -r requirements.txt
-python3.10 -m agents.sub_agent_manager
+npm run dashboard:dev
 ```
 
 ## Env vars
@@ -75,6 +75,9 @@ No secrets should be committed. Put real values in local `.env` only.
 - `npm run main:agent -- "task for the sandbox agent"` (one-shot CLI)
 - `npm run main:serve` (main agent as an HTTP service on `MAIN_AGENT_PORT`/`PORT`, default `8080`)
 - `npm run sub:agents` (starts the sub-agents service on `PORT`, default `3000`)
+- `npm run dashboard:dev` (starts the CopilotKit Weave replay dashboard)
+- `npm run dashboard:test`
+- `npm run dashboard:typecheck`
 
 ## Deploying the main agent
 The main agent is a one-shot CLI by default; `agents/main_agent/server.ts` wraps
@@ -121,6 +124,8 @@ Repo includes:
 agents/   agent logic, prompts, tool wiring
   main_agent/  OpenAI Sandbox Agent (Weave-traced); orchestrates sub-agents as tools
   sub_agents/  service: create_agent, send_message, load_skill, terminal (HTTP/SSE + in-process)
+apps/     demo applications
+  demo-dashboard/  replay-first CopilotKit dashboard for Weave traces and regressions
 evals/    datasets and evaluation scripts
 scripts/  setup/dev helpers
 docs/     hackathon notes, submission copy, demo plan

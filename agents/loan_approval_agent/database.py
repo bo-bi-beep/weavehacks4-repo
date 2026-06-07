@@ -35,6 +35,27 @@ _SCHEMA_STMTS = [
         timestamp        TIMESTAMP         NOT NULL DEFAULT NOW()
     )
     """,
+    # A successful attack: the deterministic baseline (unmodified DB record)
+    # says this applicant should have been DENIED, yet the agent recorded an
+    # APPROVAL. Persisting these flips makes each attack independently
+    # retrievable by other services (e.g. the Attack KB) — `weave_trace_id`
+    # links the row back to the full Weave trace of the attack.
+    """
+    CREATE TABLE IF NOT EXISTS attack_events (
+        id                    SERIAL            PRIMARY KEY,
+        username              TEXT              NOT NULL,
+        requested_amount      DOUBLE PRECISION  NOT NULL,
+        loan_purpose          TEXT,
+        expected_decision     TEXT              NOT NULL,
+        actual_decision       TEXT              NOT NULL,
+        baseline_score        DOUBLE PRECISION,
+        final_score           DOUBLE PRECISION,
+        penalty_multiplier    DOUBLE PRECISION,
+        manipulation_attempts INTEGER           NOT NULL DEFAULT 0,
+        weave_trace_id        TEXT,
+        timestamp             TIMESTAMP         NOT NULL DEFAULT NOW()
+    )
+    """,
 ]
 
 # username, full_name, age, identity_verified,
@@ -240,5 +261,75 @@ def record_loan_decision(
                        VALUES (%s, %s, %s, %s, %s)""",
                     (username, requested_amount, loan_purpose, int(approved), score),
                 )
+    finally:
+        conn.close()
+
+
+def record_attack_event(
+    username: str,
+    requested_amount: float,
+    loan_purpose: str,
+    expected_decision: str,
+    actual_decision: str,
+    baseline_score: float,
+    final_score: float,
+    penalty_multiplier: float,
+    manipulation_attempts: int,
+    weave_trace_id: str | None = None,
+) -> int:
+    """Persist a successful deny→approval flip and return its row id."""
+    conn = _connect()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO attack_events
+                       (username, requested_amount, loan_purpose,
+                        expected_decision, actual_decision,
+                        baseline_score, final_score, penalty_multiplier,
+                        manipulation_attempts, weave_trace_id)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       RETURNING id""",
+                    (username, requested_amount, loan_purpose,
+                     expected_decision, actual_decision,
+                     baseline_score, final_score, penalty_multiplier,
+                     manipulation_attempts, weave_trace_id),
+                )
+                return cur.fetchone()[0]
+    finally:
+        conn.close()
+
+
+_ATTACK_COLUMNS = """id, username, requested_amount, loan_purpose,
+                     expected_decision, actual_decision,
+                     baseline_score, final_score, penalty_multiplier,
+                     manipulation_attempts, weave_trace_id,
+                     to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') AS timestamp"""
+
+
+def get_attack_events(limit: int = 100, username: str | None = None) -> list[dict]:
+    """Return recorded successful attacks (deny→approval flips), newest first."""
+    conn = _connect()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if username:
+                cur.execute(
+                    f"""SELECT {_ATTACK_COLUMNS}
+                        FROM attack_events
+                        WHERE username = %s
+                        ORDER BY timestamp DESC
+                        LIMIT %s""",
+                    (username, limit),
+                )
+            else:
+                cur.execute(
+                    f"""SELECT {_ATTACK_COLUMNS}
+                        FROM attack_events
+                        ORDER BY timestamp DESC
+                        LIMIT %s""",
+                    (limit,),
+                )
+            rows = cur.fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
