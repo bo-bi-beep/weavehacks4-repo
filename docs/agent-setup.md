@@ -22,7 +22,8 @@ export WANDB_API_KEY=your-wandb-api-key
 export WANDB_ENTITY=your-wandb-entity
 export WANDB_PROJECT=weavehacks4-your-idea
 export OPENAI_API_KEY=your-openai-api-key
-export OPENAI_MODEL=gpt-5.4-mini
+export MAIN_AGENT_MODEL=gpt-5.5   # Main Agent (orchestrator) model
+export OPENAI_MODEL=gpt-5.4-mini  # sub-agents' model
 # Blaxel sandbox (compute backend for agents/main_agent)
 export BL_API_KEY=your-blaxel-api-key
 export BL_WORKSPACE=your-blaxel-workspace

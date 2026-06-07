@@ -106,7 +106,7 @@ def generate_attack_direction(
     skills: list[str],
     user_data: dict[str, Any],
     history_str: str,
-    model_name: str = "gpt-4o",
+    model_name: str = "gpt-5.5",
 ) -> str:
     """Ask the Main Agent LLM for the next optimized attack direction.
 
@@ -114,7 +114,7 @@ def generate_attack_direction(
         skills: Available sub-agent attack skills.
         user_data: Synthetic borrower/application context from the ETL module.
         history_str: Markdown summary from historical Weave traces.
-        model_name: OpenAI model name. Defaults to ``gpt-4o``.
+        model_name: OpenAI model name. Defaults to ``gpt-5.5``.
 
     Returns:
         A highly specific single-sentence attack direction for the sub-agents.
