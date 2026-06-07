@@ -29,20 +29,6 @@ python3.10 -m pip install -r requirements.txt
 python3.10 -m agents.sub_agent_manager
 ```
 
-Export selected Weave trace fields:
-```bash
-python3.10 -m agents.main_agent.main_agent_module.trace_exporter \
-  --project "$WANDB_ENTITY/$WANDB_PROJECT" \
-  --output data/weave_traces/latest_trace_calls.jsonl \
-  --limit 100
-```
-
-Custom field selection:
-```bash
-python3.10 -m agents.main_agent.main_agent_module.trace_exporter \
-  --fields "id,op_name,trace_id,inputs.attack_direction,output.is_breached,summary.weave.status"
-```
-
 ## Env vars
 Fill in:
 - `WANDB_API_KEY`
