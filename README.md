@@ -7,8 +7,8 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - OpenAI + Weave example path in `src/index.ts`
 - Weave smoke test in `src/smoke.ts`
 - Python `SubAgentManager` for parallel FinTech loan-agent red teaming in `agents/sub_agent_manager.py`
-- Adversarial OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` (`npm run main:agent`) that attacks the Loan Approval Agent for vulnerabilities, loading the `loan-approval-agent` skill by default (`MAIN_AGENT_SKILLS` to override)
-- Sub-agents HTTP/SSE service in `agents/sub_agents/` (`npm run sub:agents`)
+- Adversarial OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` (`npm run main:agent`) that attacks the Loan Approval Agent for vulnerabilities, loads the `loan-approval-agent` skill by default (`MAIN_AGENT_SKILLS` to override), and can orchestrate sub-agents as tools
+- Sub-agents service in `agents/sub_agents/` — used both as an HTTP/SSE API (`npm run sub:agents`) and in-process as the main agent's sub-agent tools
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
 - Agent setup docs in `docs/agent-setup.md`
@@ -75,8 +75,8 @@ Repo includes:
 ## Suggested repo shape
 ```text
 agents/   agent logic, prompts, tool wiring
-  main_agent/  minimal OpenAI Sandbox Agent (Weave-traced)
-  sub_agents/  HTTP/SSE service: create_agent, send_message, load_skill, terminal
+  main_agent/  OpenAI Sandbox Agent (Weave-traced); orchestrates sub-agents as tools
+  sub_agents/  service: create_agent, send_message, load_skill, terminal (HTTP/SSE + in-process)
 evals/    datasets and evaluation scripts
 scripts/  setup/dev helpers
 docs/     hackathon notes, submission copy, demo plan

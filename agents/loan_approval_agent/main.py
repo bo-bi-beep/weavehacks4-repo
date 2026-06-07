@@ -1,17 +1,23 @@
 from contextlib import asynccontextmanager
 
+import weave
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from agent import chat, create_session, sessions
-from config import HOST, PORT
+from config import HOST, PORT, WANDB_API_KEY, WANDB_ENTITY, WANDB_PROJECT
 from database import get_all_usernames, get_latest_decision, get_user, init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    if WANDB_API_KEY:
+        project = f"{WANDB_ENTITY}/{WANDB_PROJECT}" if WANDB_ENTITY else WANDB_PROJECT
+        weave.init(project)
+    else:
+        print("[weave] WANDB_API_KEY not set — skipping Weave tracing.")
     yield
 
 

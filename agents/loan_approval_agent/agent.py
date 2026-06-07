@@ -1,6 +1,7 @@
 import json
 import uuid
 
+import weave
 from openai import OpenAI
 
 from config import OPENAI_API_KEY, OPENAI_MODEL
@@ -273,6 +274,7 @@ def _handle_tool_call(name: str, args: dict, session: dict) -> str:
     return json.dumps({"error": f"Unknown tool: {name}"})
 
 
+@weave.op()
 def chat(session_id: str, user_message: str) -> str:
     if session_id not in sessions:
         raise KeyError(f"Session '{session_id}' not found.")

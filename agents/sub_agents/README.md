@@ -123,6 +123,11 @@ The sandbox runs remotely on Blaxel, so no special host is required. Get
 
 ## Reuse in-process
 
+[`agents/main_agent`](../main_agent/) consumes this service this way — it wraps a
+`SubAgentService` as function tools (`spawn_sub_agent`, `ask_sub_agent`, …) so the
+main agent can spawn and delegate to a dynamic number of sub-agents within one
+traced run, no HTTP server required.
+
 The service runs without the HTTP layer, too:
 
 ```ts
