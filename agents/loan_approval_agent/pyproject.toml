@@ -10,5 +10,6 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "python-dotenv>=1.0.0",
     "weave",
+    "psycopg2-binary>=2.9.0",
 ]
 
