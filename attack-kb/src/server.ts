@@ -72,6 +72,13 @@ export function createAttackKbServer() {
       if (method === "POST" && url.pathname === "/api/recommendations") {
         await initWeave();
         const body = asRequestBody(await readJsonBody(req));
+        json(res, 200, await tracedCachedRecommendationRequest(body));
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/api/recommendations/live") {
+        await initWeave();
+        const body = asRequestBody(await readJsonBody(req));
         json(res, 200, await tracedRecommendationRequest(body));
         return;
       }
@@ -111,8 +118,8 @@ export function startAttackKbServer() {
   const port = parseAttackKbServerPort();
   server.listen(port, () => {
     console.log(`Attack KB server listening on http://localhost:${port}`);
-    console.log("POST /api/recommendations to retrieve Redis artifacts and run the Attack KB recommendationBuilder.");
-    console.log("POST /api/recommendations/cached to reuse a cached full recommendation response on repeat requests.");
+    console.log("POST /api/recommendations to retrieve Redis artifacts and reuse cached full responses on repeat requests.");
+    console.log("POST /api/recommendations/live to bypass the full-response cache.");
   });
   return server;
 }

@@ -6,6 +6,12 @@ FROM node:22-slim
 
 WORKDIR /app
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl python3 \
+  && rm -rf /var/lib/apt/lists/* \
+  && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
+  && uvx --from context-surfaces python -c "import context_surfaces"
+
 COPY package.json package-lock.json ./
 RUN npm ci --include=dev
 

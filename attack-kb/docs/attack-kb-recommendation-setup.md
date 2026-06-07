@@ -95,10 +95,11 @@ Expected:
 
 ## 3. How retrieval works
 
-The server endpoint is:
+The server endpoints are:
 
 ```text
-POST /api/recommendations
+POST /api/recommendations       # cached full recommendation response by default
+POST /api/recommendations/live  # diagnostics path that bypasses the full-response cache
 ```
 
 For each request, the server:
@@ -123,9 +124,10 @@ For each request, the server:
    - plus older route/scenario types when present
 3. Uses any curated `payload_template` artifacts only if normal retrieval selects them; the server does not seed hardcoded recommendation templates.
 4. Opportunistically hydrates selected route-composition artifacts through Context Retriever tools when `ATTACK_KB_CONTEXT_RETRIEVER=auto`.
-5. Wraps the Attack KB `recommendationBuilder` output in the configured LLM cache; with `ATTACK_KB_LLM_CACHE=langcache`, repeat requests can return from managed Redis LangCache.
-6. Sends selected artifacts to the Attack KB `recommendationBuilder` role defined under `agents/attack_kb/recommendation-builder` on cache miss.
-7. Returns the LLM-composed recommendation packet.
+5. Checks the full-response recommendation cache for repeated profile/options payloads, ignoring only `options.requestId`.
+6. Wraps the Attack KB `recommendationBuilder` output in the configured LLM cache; with `ATTACK_KB_LLM_CACHE=langcache`, repeat requests can return from managed Redis LangCache.
+7. Sends selected artifacts to the Attack KB `recommendationBuilder` role defined under `agents/attack_kb/recommendation-builder` on cache miss.
+8. Returns the LLM-composed recommendation packet with cache metadata.
 
 The response includes retrieval transparency:
 
@@ -150,6 +152,12 @@ The response includes retrieval transparency:
     "exact": true,
     "task": "recommendation-builder",
     "model": "gpt-5.5"
+  },
+  "serverRecommendationCache": {
+    "provider": "redis",
+    "hit": true,
+    "timings": { "cacheLookupMs": 38, "totalMs": 41 },
+    "requestFingerprintExcludes": ["options.requestId"]
   }
 }
 ```
@@ -190,6 +198,7 @@ ok: true
 phase: attack
 selectedArtifacts includes Redis-retrieved curated KB artifact entries
 contextRetriever.hydrated > 0 when MCP_AGENT_KEY is configured
+serverRecommendationCache.provider/hit/timings are present on `POST /api/recommendations`
 recommendationBuilderCache.provider is langcache/redis/local depending on ATTACK_KB_LLM_CACHE
 recommendations[].attackerGoal
 recommendations[].targetOutcome

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
 
 import { createAttackKbRedisClient, readAttackKbRedisConnectionConfig, type AttackKbRedisClient } from "./redis/client.js";
 import type { AttackKbRecommendationOptions } from "./recommendations.js";
@@ -20,6 +21,12 @@ export type AttackKbRecommendationResponseCacheMetadata = {
   expiresAt?: string;
   servedAt: string;
   cachedRequestId?: string;
+  timings?: {
+    cacheLookupMs: number;
+    loaderMs?: number;
+    cacheSetMs?: number;
+    totalMs: number;
+  };
   requestFingerprintExcludes: ["options.requestId"];
 };
 
@@ -255,6 +262,10 @@ function serializeStoredEntry(entry: StoredAttackKbRecommendationResponse): stri
   return serialized;
 }
 
+function elapsedMs(start: number): number {
+  return Math.round(performance.now() - start);
+}
+
 function cacheMetadata(
   hit: boolean,
   result: AttackKbRecommendationResponseCacheKey & {
@@ -263,6 +274,7 @@ function cacheMetadata(
     expiresAt?: string;
     response?: AttackKbResponse;
   },
+  timings?: AttackKbRecommendationResponseCacheMetadata["timings"],
 ): AttackKbRecommendationResponseCacheMetadata {
   return {
     provider: result.provider,
@@ -273,6 +285,7 @@ function cacheMetadata(
     expiresAt: result.expiresAt,
     servedAt: new Date().toISOString(),
     cachedRequestId: result.response?.requestId,
+    timings,
     requestFingerprintExcludes: ["options.requestId"],
   };
 }
@@ -511,12 +524,27 @@ export async function getOrCreateCachedAttackKbRecommendationResponse(
   loader: () => Promise<AttackKbResponse>,
   cache: AttackKbRecommendationResponseCache = getDefaultAttackKbRecommendationResponseCache(),
 ): Promise<AttackKbCachedRecommendationResponse> {
+  const totalStart = performance.now();
+  const lookupStart = performance.now();
   const hit = await cache.get(body);
+  const cacheLookupMs = elapsedMs(lookupStart);
   if (hit) {
-    return withCacheMetadata(body, hit.response, cacheMetadata(true, hit));
+    return withCacheMetadata(body, hit.response, cacheMetadata(true, hit, {
+      cacheLookupMs,
+      totalMs: elapsedMs(totalStart),
+    }));
   }
 
+  const loaderStart = performance.now();
   const response = await loader();
+  const loaderMs = elapsedMs(loaderStart);
+  const setStart = performance.now();
   const setResult = await cache.set(body, response);
-  return withCacheMetadata(body, response, cacheMetadata(false, setResult));
+  const cacheSetMs = elapsedMs(setStart);
+  return withCacheMetadata(body, response, cacheMetadata(false, setResult, {
+    cacheLookupMs,
+    loaderMs,
+    cacheSetMs,
+    totalMs: elapsedMs(totalStart),
+  }));
 }

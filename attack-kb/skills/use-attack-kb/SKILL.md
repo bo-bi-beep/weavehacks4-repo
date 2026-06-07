@@ -47,9 +47,12 @@ The server is responsible for:
 Redis retrieval -> artifact selection -> Attack KB recommendationBuilder -> recommendationBuilderCache -> W&B/Weave trace -> recommendation response
 ```
 
-Recommendation caching is server-side. The caller should not manage cache env vars, but should preserve/report `recommendationBuilderCache` when present:
+Recommendation caching is server-side. `POST /api/recommendations` uses the full-response cache by default; `POST /api/recommendations/live` bypasses it for diagnostics. The caller should not manage cache env vars, but should preserve/report `serverRecommendationCache` and `recommendationBuilderCache` when present:
 
 ```txt
+serverRecommendationCache.provider   # disabled | local | redis
+serverRecommendationCache.hit        # true means repeated profile/options reused the full packet
+serverRecommendationCache.timings     # cache lookup / builder-load / total timing breakdown
 recommendationBuilderCache.provider  # disabled | local | redis | langcache
 recommendationBuilderCache.hit       # true means repeated profile/options reused cached builder output
 recommendationBuilderCache.exact     # true means exact cache key/input match
@@ -161,6 +164,7 @@ The Agent Under Test is the **SecureBank Loan Approval Agent** — an OpenAI `gp
 3. Return a concise packet to the main agent with:
    - requestId
    - phase
+   - serverRecommendationCache provider/hit/timings when present
    - recommendationBuilderCache provider/hit/exact when present
    - selected artifact ids/types
    - each recommendation id
@@ -183,6 +187,9 @@ requestId
 generatedAt
 phase
 artifactSelection.selectedRefs
+serverRecommendationCache.provider
+serverRecommendationCache.hit
+serverRecommendationCache.timings
 recommendationBuilderCache.provider
 recommendationBuilderCache.hit
 recommendationBuilderCache.exact
@@ -204,7 +211,7 @@ recommendations[].safetyBoundary
 - [ ] KB server URL is known/reachable.
 - [ ] No general-purpose recommendation-fetcher subagent was spawned.
 - [ ] Response includes Redis artifact selection.
-- [ ] Response cache metadata, if present, is preserved/reported.
+- [ ] Response cache metadata (`serverRecommendationCache`) and builder cache metadata are preserved/reported when present.
 - [ ] Response includes payload template refs.
 - [ ] Sample turns use `attacker_agent`, not `main_agent`.
 - [ ] Main agent receives recommendation packet and can choose an attacker_agent route.

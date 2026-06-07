@@ -1,6 +1,6 @@
 # Deploy Attack KB server on Railway
 
-This deploys the **Attack KB Node API** (`POST /api/recommendations`, `POST /api/recommendations/cached`) to Railway. Redis Cloud still backs the KB data/services; Railway only hosts the HTTP wrapper.
+This deploys the **Attack KB Node API** (`POST /api/recommendations`, `POST /api/recommendations/live`) to Railway. Redis Cloud still backs the KB data/services; Railway only hosts the HTTP wrapper.
 
 ## What Railway hosts
 
@@ -8,7 +8,7 @@ This deploys the **Attack KB Node API** (`POST /api/recommendations`, `POST /api
 Railway Node service
   -> /api/health
   -> /api/recommendations
-  -> /api/recommendations/cached
+  -> /api/recommendations/live
   -> Redis Cloud DB / Query Engine / vector search via REDIS_URL
   -> Redis LangCache
   -> Redis Agent Memory
@@ -23,7 +23,7 @@ The repo includes `railway.json`:
 
 ```json
 {
-  "build": { "builder": "NIXPACKS", "buildCommand": "npm run build" },
+  "build": { "builder": "DOCKERFILE", "dockerfilePath": "Dockerfile" },
   "deploy": {
     "startCommand": "npm run attack-kb:server:prod",
     "healthcheckPath": "/api/health"
@@ -37,7 +37,7 @@ Production start command:
 npm run attack-kb:server:prod
 ```
 
-This runs compiled JS from `dist/attack-kb/src/server-start.js`. The build also copies `agents/attack_kb` markdown into `dist/agents/attack_kb` so the production recommendation server can load role instructions.
+This runs compiled JS from `dist/attack-kb/src/server-start.js`. The Docker image installs `python3` and `uvx` so Redis Context Retriever hydration can call the `context-surfaces` Python client in production. The build also copies `agents/attack_kb` markdown into `dist/agents/attack_kb` so the production recommendation server can load role instructions.
 
 ## Railway variables
 
@@ -112,7 +112,7 @@ Use `ATTACK_KB_LANGCACHE_FALLBACK=disabled` on Railway so the deployed service s
 
 ### Full recommendation response cache
 
-`POST /api/recommendations/cached` caches the full server response by exact request fingerprint. The fingerprint ignores `options.requestId`, so repeated semantic requests can hit even when callers use fresh request IDs.
+`POST /api/recommendations` caches the full server response by exact request fingerprint. The fingerprint ignores `options.requestId`, so repeated semantic requests can hit even when callers use fresh request IDs. Use `POST /api/recommendations/live` only when diagnosing uncached latency.
 
 ```bash
 ATTACK_KB_RECOMMENDATION_RESPONSE_CACHE=redis
@@ -228,10 +228,10 @@ curl -s -X POST "$ATTACK_KB_SERVER_URL/api/recommendations" \
       "mainIrisContext": { "limit": 12 },
       "recommendationBuilder": { "mode": "openai", "maxRecommendations": 4 }
     }
-  }' | jq '{requestId, phase, recommendationBuilderCache, selected: (.artifactSelection.selectedRefs|length), recs: [.recommendations[].id]}'
+  }' | jq '{requestId, phase, serverRecommendationCache, recommendationBuilderCache, selected: (.artifactSelection.selectedRefs|length), recs: [.recommendations[].id]}'
 ```
 
-Cached recommendation smoke: repeat the same body against `/api/recommendations/cached` and expect the first response to include `serverRecommendationCache.hit=false`, then the second to include `serverRecommendationCache.hit=true`.
+Cached recommendation smoke: repeat the same body against `/api/recommendations` and expect the first response to include `serverRecommendationCache.hit=false`, then the second to include `serverRecommendationCache.hit=true`. Use `/api/recommendations/live` only to measure an uncached request.
 
 ## Common failures
 
