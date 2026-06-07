@@ -41,6 +41,19 @@ export type SourceRetrievalPacket = {
   safetyNotes: string;
 };
 
+export type SourceGatheringPacket = {
+  runId: string;
+  generatedAt: string;
+  mission: string;
+  retrievedSources: SourceRetrievalPacket[];
+  discardedCandidates: Array<{
+    title: string;
+    url: string;
+    reason: string;
+  }>;
+  notes?: string;
+};
+
 export type CredibilityTriageDecision = {
   candidateUrl: string;
   title: string;
@@ -58,30 +71,39 @@ export type CredibilityTriagePacket = {
   decisions: CredibilityTriageDecision[];
 };
 
-export type CuratedSourceArtifactInput = {
-  id?: string;
+export const CURATED_DERIVED_OBJECT_TYPES = [
+  "vulnerability",
+  "attack_pattern",
+  "system_attack_pattern",
+  "evidence_source",
+  "delivery_mode",
+  "success_signal",
+] as const satisfies readonly AttackKbStorageObjectType[];
+
+export type CuratedDerivedObjectType = (typeof CURATED_DERIVED_OBJECT_TYPES)[number];
+
+export type CuratedDerivedArtifactInput = {
+  id: string;
+  objectType: CuratedDerivedObjectType;
+  domain?: "credit_loan";
   title: string;
   description: string;
-  category: AttackKbSourceCategory;
-  sourceType: EvidenceSourceType;
-  url: string;
-  provenance: SourceProvenance;
-  evidence: SourceEvidence[];
-  suggestedObjectTypes: AttackKbStorageObjectType[];
+  sourceRefs: string[];
   tags: string[];
+  payload: Record<string, unknown>;
 };
 
 export type KbCuratorPacket = {
   runId: string;
   generatedAt: string;
-  approvedSourceArtifacts: CuratedSourceArtifactInput[];
+  artifacts: CuratedDerivedArtifactInput[];
   rejectedCandidateUrls: string[];
   curatorNotes: string;
 };
 
-export type PersistedSourceArtifact = {
+export type PersistedDerivedArtifact = {
   id: string;
-  objectType: "source_artifact";
+  objectType: CuratedDerivedObjectType;
   title: string;
   redisKey: string;
   contextProjectionKey?: string;

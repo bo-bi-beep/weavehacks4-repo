@@ -1,0 +1,1 @@
+Discover public defensive sources, validate that each can be fetched, retrieve safe evidence/provenance, and return only successfully retrieved source packets for Credibility Triage. Do not write Redis.

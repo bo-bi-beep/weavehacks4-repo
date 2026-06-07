@@ -31,8 +31,7 @@ export BL_WORKSPACE=your-blaxel-workspace
 
 # Attack KB fleet: OpenAI powers model calls; W&B powers Weave traces.
 export ATTACK_KB_LLM_PROVIDER=openai
-export ATTACK_KB_SOURCE_DISCOVERY_MODEL=gpt-5.4-mini
-export ATTACK_KB_SOURCE_RETRIEVAL_MODEL=gpt-5.4-mini
+export ATTACK_KB_SOURCE_GATHERING_MODEL=gpt-5.4-mini
 export ATTACK_KB_CREDIBILITY_TRIAGE_MODEL=gpt-5.5
 export ATTACK_KB_CURATOR_MODEL=gpt-5.5
 export ATTACK_KB_RECOMMENDER_MODEL=gpt-5.5
@@ -201,6 +200,12 @@ Attack KB live sandbox agents use the same in-process `SubAgentService` pattern
 through `attack-kb/src/sandbox.ts`. Deterministic Attack KB demos/evals do not
 launch Blaxel; use `npm run attack-kb:sandbox-smoke` to inspect the sandbox config
 and missing live-launch env vars.
+
+For the current recommendation handoff, start the Attack KB server with
+`npm run attack-kb:server` and have the main agent use `.agents/skills/use-attack-kb/SKILL.md`.
+That skill spawns a recommendation-fetcher subagent that calls
+`POST /api/recommendations` and returns the W&B/Weave-traced recommendation packet.
+See `attack-kb/docs/attack-kb-recommendation-setup.md` for the full setup and smoke test.
 
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`, and Attack KB model calls expect your local `OPENAI_API_KEY`.

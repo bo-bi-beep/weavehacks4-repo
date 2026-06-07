@@ -15,8 +15,7 @@ Test and do not receive raw Redis admin credentials.
 
 ## Roles
 
-- `source-discovery/`
-- `source-retrieval/`
+- `source-gathering/`
 - `credibility-triage/`
 - `kb-curator/`
 - `recommendation-builder/`

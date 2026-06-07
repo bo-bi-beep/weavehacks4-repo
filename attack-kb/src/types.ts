@@ -89,7 +89,40 @@ export type RecommendationComposition = {
   rationale: string;
 };
 
+export type AttackRecommendationDerivedArtifactRef = {
+  id: string;
+  storageType: AttackKbStorageObjectType;
+  title: string;
+  sourceRefs?: string[];
+};
+
+export type AttackRecommendationSampleTurn = {
+  speaker: "attacker_agent" | "agent_under_test" | "tool" | "evaluator";
+  content: string;
+  purpose?: string;
+};
+
+export type AttackRecommendationSampleScenario = {
+  id: string;
+  title: string;
+  deliveryModeRef?: string;
+  attackerObjective: string;
+  targetOutcome: string;
+  syntheticSetup: string;
+  turns: AttackRecommendationSampleTurn[];
+  breachSuccessIndicators: string[];
+  resistanceSignals: string[];
+  observationChecklist: string[];
+};
+
 export type AttackRecommendation = {
+  attackerGoal?: string;
+  targetOutcome?: string;
+  attackNarrative?: string;
+  attackerSteps?: string[];
+  breachSuccessCriteria?: string[];
+  resistanceSignals?: string[];
+  evidenceToCapture?: string[];
   id: string;
   phase: AttackPhase;
   title: string;
@@ -99,6 +132,14 @@ export type AttackRecommendation = {
   businessAttackRouteRefs?: string[];
   domainScenarioRefs?: string[];
   systemPatternRefs?: string[];
+  vulnerabilityRefs?: string[];
+  attackPatternRefs?: string[];
+  deliveryModeRefs?: string[];
+  successSignalRefs?: string[];
+  payloadTemplateRefs?: string[];
+  evidenceSourceRefs?: string[];
+  derivedArtifactRefs?: AttackRecommendationDerivedArtifactRef[];
+  sampleScenarios?: AttackRecommendationSampleScenario[];
   composition?: RecommendationComposition;
   expectedFindings?: string[];
   safetyBoundary: string;
@@ -507,6 +548,20 @@ export type AttackKbRetrievedContext = {
   refs: AttackKbRetrievedContextRef[];
 };
 
+export type AttackKbArtifactSelectionRef = {
+  id: string;
+  storageType: AttackKbStorageObjectType;
+  title: string;
+  score?: number;
+  selectedFrom: "semantic_retrieval" | "template_companion" | "linked_companion";
+};
+
+export type AttackKbArtifactSelection = {
+  strategy: string;
+  primaryObjectTypes: AttackKbStorageObjectType[];
+  selectedRefs: AttackKbArtifactSelectionRef[];
+};
+
 export type AttackKbResponse = {
   requestId: string;
   generatedAt: string;
@@ -517,4 +572,5 @@ export type AttackKbResponse = {
   recommendations: AttackRecommendation[];
   kbRefs: AttackKbRef[];
   retrievedContext?: AttackKbRetrievedContext;
+  artifactSelection?: AttackKbArtifactSelection;
 };

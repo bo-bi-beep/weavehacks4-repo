@@ -555,6 +555,11 @@ function payloadSpecificLines(object: AttackKbCanonicalObject): string[] {
       ]);
     case "success_signal":
       return compactLines([`Observable outcome/success signal: ${readStringProperty(payload, "observable")}`]);
+    case "payload_template":
+      return compactLines([
+        `Payload template: ${readStringProperty(payload, "template")}`,
+        `Safety boundary: ${readStringProperty(payload, "safetyBoundary")}`,
+      ]);
     default:
       return [];
   }

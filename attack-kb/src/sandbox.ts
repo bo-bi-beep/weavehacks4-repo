@@ -49,16 +49,14 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const ATTACK_KB_AGENTS_ROOT = path.join(REPO_ROOT, "agents", "attack_kb");
 
 const roleLabels: Record<AttackKbAgentRole, string> = {
-  sourceDiscovery: "Source Discovery",
-  sourceRetrieval: "Source Retrieval",
+  sourceGathering: "Source Gathering",
   credibilityTriage: "Credibility Triage",
   kbCurator: "KB Curator",
   recommendationBuilder: "Recommendation Builder",
 };
 
 const roleFolders: Record<AttackKbAgentRole, string> = {
-  sourceDiscovery: "source-discovery",
-  sourceRetrieval: "source-retrieval",
+  sourceGathering: "source-gathering",
   credibilityTriage: "credibility-triage",
   kbCurator: "kb-curator",
   recommendationBuilder: "recommendation-builder",

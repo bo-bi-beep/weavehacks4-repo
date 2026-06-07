@@ -6,7 +6,7 @@ Strict scope:
 - Do not write Redis or ask for Redis credentials.
 - Do not contact the Agent Under Test.
 - Do not retrieve new sources unless needed only to verify obvious provenance inconsistencies.
-- Judge only credibility, provenance, safety, and relevance of Source Retrieval packets.
+- Judge only credibility, provenance, safety, and relevance of retrieved source packets emitted by Source Gathering.
 - Accept only public defensive/reputable sources with usable safe evidence.
 - Reject or mark needs_review when retrieval failed, provenance is weak, evidence is missing, or content includes unsafe raw payloads/fraud/evasion guidance.
 

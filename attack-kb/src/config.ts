@@ -1,8 +1,7 @@
 import { getWeaveProjectName } from "../../src/lib/weave.js";
 
 export const ATTACK_KB_AGENT_ROLES = [
-  "sourceDiscovery",
-  "sourceRetrieval",
+  "sourceGathering",
   "credibilityTriage",
   "kbCurator",
   "recommendationBuilder",
@@ -28,16 +27,14 @@ export type AttackKbRuntimeConfig = {
 };
 
 const roleModelEnvNames: Record<AttackKbAgentRole, string> = {
-  sourceDiscovery: "ATTACK_KB_SOURCE_DISCOVERY_MODEL",
-  sourceRetrieval: "ATTACK_KB_SOURCE_RETRIEVAL_MODEL",
+  sourceGathering: "ATTACK_KB_SOURCE_GATHERING_MODEL",
   credibilityTriage: "ATTACK_KB_CREDIBILITY_TRIAGE_MODEL",
   kbCurator: "ATTACK_KB_CURATOR_MODEL",
   recommendationBuilder: "ATTACK_KB_RECOMMENDER_MODEL",
 };
 
 const defaultRoleModels: Record<AttackKbAgentRole, string> = {
-  sourceDiscovery: "gpt-5.4-mini",
-  sourceRetrieval: "gpt-5.4-mini",
+  sourceGathering: "gpt-5.4-mini",
   credibilityTriage: "gpt-5.5",
   kbCurator: "gpt-5.5",
   recommendationBuilder: "gpt-5.5",
