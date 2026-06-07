@@ -10,3 +10,9 @@ export {
   type TerminalResult,
 } from "./service.js";
 export { createSubAgentsServer } from "./server.js";
+export {
+  InMemorySubAgentStore,
+  createSubAgentStore,
+  type PersistedAgentRecord,
+  type SubAgentStore,
+} from "./store.js";

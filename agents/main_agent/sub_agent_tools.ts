@@ -224,7 +224,7 @@ export function createSubAgentTools(service: SubAgentService): Tool[] {
       required: [],
     },
     async execute() {
-      return JSON.stringify(service.listAgents());
+      return JSON.stringify(await service.listAgents());
     },
   });
 

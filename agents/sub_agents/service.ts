@@ -15,6 +15,11 @@ import {
 
 import { BlaxelSandboxClient, createBlaxelSandboxClient } from "../../src/lib/blaxel.js";
 import { getOpenAIModel, weave } from "../../src/lib/weave.js";
+import {
+  InMemorySubAgentStore,
+  type PersistedAgentRecord,
+  type SubAgentStore,
+} from "./store.js";
 
 // Repo root, used to resolve repo skills (`.claude/skills/<name>/SKILL.md`).
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../..");
@@ -93,20 +98,9 @@ export type AgentStreamEvent =
   | { type: "done"; finalOutput: string; turns: number; historyLength: number }
   | { type: "error"; message: string };
 
-interface AgentRecord {
-  id: string;
-  name: string;
-  model: string;
-  instructions: string;
-  /** Workspace-relative path -> file content. Seeds the session; skills materialize live. */
-  manifestEntries: Map<string, string>;
-  /** Loaded skill names, in load order. */
-  skills: string[];
-  /** Running conversation, reused as input on the next turn (see SDK `result.history`). */
-  history: unknown[];
-  /** Live sandbox session (lazily created); owns the agent's persistent workspace. */
-  session: SandboxSessionHandle | null;
-}
+// An agent's serializable state lives in a SubAgentStore as a
+// PersistedAgentRecord (see store.ts); its live Blaxel session is held
+// separately, per-process, in `liveSessions` below.
 
 const DEFAULT_INSTRUCTIONS =
   "You are a sub-agent running inside an isolated Unix sandbox. Inspect the " +
@@ -224,13 +218,43 @@ function parseExecCommand(formatted: string): {
  * one persistent Blaxel sandbox session (a uniquely named micro-VM), so its
  * filesystem survives across messages and is shared with the terminal. Chat
  * memory persists via the SDK's `result.history`.
+ *
+ * Agent records are kept in a {@link SubAgentStore} (in-memory by default, Redis
+ * when `REDIS_URL` is set), so identity, skills, and chat memory can survive a
+ * restart. The live sandbox session can't be serialized, so it is cached
+ * per-process in {@link liveSessions} and re-opened on demand — re-attaching to
+ * the agent's named micro-VM when possible, else recreating it from the stored
+ * manifest (see {@link openSession}).
  */
 export class SubAgentService {
-  private readonly agents = new Map<string, AgentRecord>();
   private readonly client: BlaxelSandboxClient;
+  private readonly store: SubAgentStore;
+  /** Process-local cache of live sandbox sessions, keyed by agent id. */
+  private readonly liveSessions = new Map<string, SandboxSessionHandle>();
+  /**
+   * Opt-in sandbox **filesystem** continuity across restarts. When true, the
+   * service keeps micro-VMs alive on shutdown (detach instead of destroy) and
+   * tries to re-attach to them by name on next use. When false (the default), it
+   * destroys sandboxes on shutdown and recreates them from the stored manifest
+   * on next use — reliable, but un-persisted scratch files are lost.
+   *
+   * Enable only once you've confirmed the sandbox client can re-attach to an
+   * existing VM by name (see {@link tryReattach}); otherwise a kept-alive VM
+   * could collide with a recreate. This is independent of *registry* durability,
+   * which the store (Redis vs in-memory) controls.
+   */
+  private readonly reattachSandboxes: boolean;
 
-  constructor(client: BlaxelSandboxClient = createBlaxelSandboxClient()) {
-    this.client = client;
+  constructor(
+    opts: {
+      client?: BlaxelSandboxClient;
+      store?: SubAgentStore;
+      reattachSandboxes?: boolean;
+    } = {},
+  ) {
+    this.client = opts.client ?? createBlaxelSandboxClient();
+    this.store = opts.store ?? new InMemorySubAgentStore();
+    this.reattachSandboxes = opts.reattachSandboxes ?? false;
   }
 
   /** create_agent(): register a sub-agent and return its summary (with `id`). */
@@ -245,7 +269,7 @@ export class SubAgentService {
         manifestEntries.set("task.md", `# Task\n\n${task}\n`);
       }
 
-      const record: AgentRecord = {
+      const record: PersistedAgentRecord = {
         id,
         name,
         model: input.model?.trim() || getOpenAIModel(),
@@ -253,9 +277,8 @@ export class SubAgentService {
         manifestEntries,
         skills: [],
         history: [],
-        session: null,
       };
-      this.agents.set(id, record);
+      await this.store.save(record);
       return this.summarize(record);
     },
     { name: "createSubAgent" },
@@ -276,7 +299,7 @@ export class SubAgentService {
     const items: string[] = [];
 
     try {
-      const record = this.requireAgent(agentId);
+      const record = await this.requireAgent(agentId);
       const session = await this.ensureSession(record);
       const agent = this.buildAgent(record);
 
@@ -318,6 +341,9 @@ export class SubAgentService {
       if (Array.isArray(stream.history)) {
         record.history = stream.history as unknown[];
       }
+      // Persist the updated conversation so the next turn — even in another
+      // process — continues from here.
+      await this.store.save(record);
 
       await recordTurn({
         agentId: record.id,
@@ -348,7 +374,7 @@ export class SubAgentService {
    */
   loadSkill = weave.op(
     async (agentId: string, skill: string): Promise<LoadSkillResult> => {
-      const record = this.requireAgent(agentId);
+      const record = await this.requireAgent(agentId);
       const name = skill.trim();
       if (!name || name.includes("..") || path.isAbsolute(name)) {
         throw new Error(`Invalid skill name: ${JSON.stringify(skill)}`);
@@ -366,10 +392,15 @@ export class SubAgentService {
           "related tasks.";
       }
 
+      // Persist the new manifest/skill/instructions before touching the live
+      // session, so a recreate (this process or another) seeds the skill too.
+      await this.store.save(record);
+
       // If the session is already live, surface the skill file immediately so
       // both the agent and the terminal see it without a restart.
-      if (record.session?.materializeEntry) {
-        await record.session.materializeEntry({
+      const live = this.liveSessions.get(record.id);
+      if (live?.materializeEntry) {
+        await live.materializeEntry({
           path: sandboxPath,
           entry: file({ content }),
         });
@@ -399,7 +430,7 @@ export class SubAgentService {
       command: string,
       opts: RunCommandOptions = {},
     ): Promise<TerminalResult> => {
-      const record = this.requireAgent(agentId);
+      const record = await this.requireAgent(agentId);
       const session = await this.ensureSession(record);
       const result = await execInSession(session, {
         cmd: command,
@@ -414,34 +445,51 @@ export class SubAgentService {
   );
 
   /** Returns a summary for every registered agent. */
-  listAgents(): AgentSummary[] {
-    return [...this.agents.values()].map((record) => this.summarize(record));
+  async listAgents(): Promise<AgentSummary[]> {
+    const records = await this.store.list();
+    return records.map((record) => this.summarize(record));
   }
 
   /** Returns the summary for one agent, or `undefined` if unknown. */
-  getAgent(agentId: string): AgentSummary | undefined {
-    const record = this.agents.get(agentId);
+  async getAgent(agentId: string): Promise<AgentSummary | undefined> {
+    const record = await this.store.load(agentId);
     return record ? this.summarize(record) : undefined;
   }
 
-  /** Removes an agent and tears down its sandbox session. */
+  /** Removes an agent and tears down its sandbox micro-VM. */
   async deleteAgent(agentId: string): Promise<boolean> {
-    const record = this.agents.get(agentId);
-    if (!record) return false;
-    await this.closeSession(record);
-    return this.agents.delete(agentId);
+    await this.closeSession(agentId, { destroy: true });
+    return this.store.delete(agentId);
   }
 
-  /** Closes every agent's sandbox session. Call on server shutdown. */
-  async closeAll(): Promise<void> {
+  /**
+   * Closes every live sandbox session. By default it destroys the micro-VMs
+   * (the original behavior, used by one-shot runs); pass `destroy: false` to
+   * detach and leave them running so a restart can re-attach.
+   */
+  async closeAll(opts: { destroy?: boolean } = {}): Promise<void> {
+    const destroy = opts.destroy ?? true;
     await Promise.all(
-      [...this.agents.values()].map((record) => this.closeSession(record)),
+      [...this.liveSessions.keys()].map((id) =>
+        this.closeSession(id, { destroy }),
+      ),
     );
+  }
+
+  /**
+   * Graceful shutdown for the long-running service. Detaches sandboxes (keeping
+   * the micro-VMs alive for re-attach) when {@link reattachSandboxes} is set,
+   * otherwise destroys them — then releases the store. Records are left in a
+   * durable store so a restart recovers them.
+   */
+  async close(): Promise<void> {
+    await this.closeAll({ destroy: !this.reattachSandboxes });
+    await this.store.close();
   }
 
   // --- internals -----------------------------------------------------------
 
-  private buildAgent(record: AgentRecord): SandboxAgent {
+  private buildAgent(record: PersistedAgentRecord): SandboxAgent {
     // The workspace is supplied by the agent's live session, so no manifest is
     // attached here — only instructions and capabilities vary per turn.
     return new SandboxAgent({
@@ -453,7 +501,7 @@ export class SubAgentService {
   }
 
   /** Builds a {@link Manifest} that seeds a session from accumulated entries. */
-  private buildManifest(record: AgentRecord): Manifest {
+  private buildManifest(record: PersistedAgentRecord): Manifest {
     const entries: Record<string, ReturnType<typeof file>> = {};
     for (const [entryPath, content] of record.manifestEntries) {
       entries[entryPath] = file({ content });
@@ -462,32 +510,94 @@ export class SubAgentService {
   }
 
   /**
-   * Lazily creates (and caches) the agent's live Blaxel sandbox session.
+   * Returns the agent's live Blaxel session, caching it per-process. On a cache
+   * miss (first use, or the first use in a freshly restarted process) it opens
+   * the session via {@link openSession}.
    *
-   * Each agent gets its own uniquely named micro-VM so their filesystems stay
-   * isolated — without an explicit `name`, two `create()` calls would
-   * auto-generate distinct sandboxes anyway, but a stable per-agent name makes
-   * the sandbox easy to find in the Blaxel console.
+   * Each agent has its own uniquely named micro-VM so their filesystems stay
+   * isolated, and the stable per-agent name makes the sandbox easy to find in
+   * the Blaxel console — and is what lets us re-attach after a restart.
    */
   private async ensureSession(
-    record: AgentRecord,
+    record: PersistedAgentRecord,
   ): Promise<SandboxSessionHandle> {
-    if (!record.session) {
-      record.session = await this.client.create(this.buildManifest(record), {
-        name: sandboxNameFor(record.id),
-      });
-    }
-    return record.session;
+    const cached = this.liveSessions.get(record.id);
+    if (cached) return cached;
+    const session = await this.openSession(record);
+    this.liveSessions.set(record.id, session);
+    return session;
   }
 
-  /** Best-effort teardown of an agent's session and its workspace. */
-  private async closeSession(record: AgentRecord): Promise<void> {
-    const session = record.session;
-    record.session = null;
-    if (!session) return;
+  /**
+   * Opens the agent's sandbox. Tries to **re-attach** to its existing, uniquely
+   * named micro-VM first, so files written on earlier turns — possibly in a
+   * previous process — survive. Falls back to **recreating** the sandbox from
+   * the stored manifest if the backend can't re-attach or the VM's TTL has
+   * expired.
+   *
+   * Either way the conversation history is preserved by the store, so the agent
+   * keeps its memory; only un-persisted scratch files are lost on the recreate
+   * path (the manifest — task.md plus loaded skills — is reseeded).
+   */
+  private async openSession(
+    record: PersistedAgentRecord,
+  ): Promise<SandboxSessionHandle> {
+    const name = sandboxNameFor(record.id);
+    if (this.reattachSandboxes) {
+      const reattached = await this.tryReattach(name);
+      if (reattached) return reattached;
+    }
+    return this.client.create(this.buildManifest(record), { name });
+  }
+
+  /**
+   * Best-effort re-attach to an existing sandbox by name. The OpenAI/Blaxel
+   * sandbox client may expose this under different method names across versions
+   * (or not at all), so we feature-detect; if none is available — or it throws
+   * because the micro-VM is gone — we return `null` and the caller recreates
+   * from the manifest.
+   *
+   * NOTE: verify the exact re-attach method for the installed
+   * `@openai/agents-extensions` version; until then this safely degrades to
+   * recreate-from-manifest on every restart.
+   */
+  private async tryReattach(
+    name: string,
+  ): Promise<SandboxSessionHandle | null> {
+    const client = this.client as unknown as Record<
+      string,
+      ((name: string) => Promise<SandboxSessionHandle>) | undefined
+    >;
+    const reattach = client.connect ?? client.get ?? client.attach;
+    if (typeof reattach !== "function") return null;
     try {
-      // Prefer delete() so the Blaxel micro-VM is torn down, not just detached.
-      await (session.delete?.() ?? session.close?.());
+      return await reattach.call(this.client, name);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Best-effort teardown of a live session. With `destroy` (the default) the
+   * Blaxel micro-VM is deleted; otherwise the session is only detached, leaving
+   * the VM running so a later {@link openSession} can re-attach to it.
+   */
+  private async closeSession(
+    id: string,
+    opts: { destroy?: boolean } = {},
+  ): Promise<void> {
+    const session = this.liveSessions.get(id);
+    if (!session) return;
+    this.liveSessions.delete(id);
+    try {
+      if (opts.destroy ?? true) {
+        // Prefer delete() so the micro-VM is torn down, not just detached.
+        await (session.delete?.() ?? session.close?.());
+      } else {
+        // Detach only: keep the VM alive for re-attach (fall back to delete()
+        // if the backend has no close()).
+        await (session.close?.() ?? session.delete?.());
+      }
     } catch {
       // Best-effort cleanup; a leaked sandbox eventually expires via its TTL.
     }
@@ -511,15 +621,15 @@ export class SubAgentService {
     );
   }
 
-  private requireAgent(agentId: string): AgentRecord {
-    const record = this.agents.get(agentId);
+  private async requireAgent(agentId: string): Promise<PersistedAgentRecord> {
+    const record = await this.store.load(agentId);
     if (!record) {
       throw new Error(`Unknown agent: ${agentId}`);
     }
     return record;
   }
 
-  private summarize(record: AgentRecord): AgentSummary {
+  private summarize(record: PersistedAgentRecord): AgentSummary {
     return {
       id: record.id,
       name: record.name,

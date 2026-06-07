@@ -8,6 +8,7 @@ import {
   requireEnv,
 } from "../../src/lib/weave.js";
 import { AgentStreamEvent, SubAgentService } from "./service.js";
+import { createSubAgentStore } from "./store.js";
 
 /**
  * HTTP + SSE front door for {@link SubAgentService}. Endpoints:
@@ -40,12 +41,14 @@ async function handle(
   const segments = url.pathname.split("/").filter(Boolean);
 
   if (method === "GET" && url.pathname === "/health") {
-    return sendJson(res, 200, { ok: true, agents: service.listAgents().length });
+    const agents = await service.listAgents();
+    return sendJson(res, 200, { ok: true, agents: agents.length });
   }
 
   // /agents
   if (segments[0] === "agents" && segments.length === 1) {
-    if (method === "GET") return sendJson(res, 200, { agents: service.listAgents() });
+    if (method === "GET")
+      return sendJson(res, 200, { agents: await service.listAgents() });
     if (method === "POST") {
       const body = await readJson(req);
       const summary = await service.createAgent(body);
@@ -61,7 +64,7 @@ async function handle(
 
     if (!sub) {
       if (method === "GET") {
-        const summary = service.getAgent(id);
+        const summary = await service.getAgent(id);
         return summary
           ? sendJson(res, 200, summary)
           : sendJson(res, 404, { error: `Unknown agent: ${id}` });
@@ -185,7 +188,14 @@ async function main(): Promise<void> {
   const tracing = await initWeave();
 
   const port = Number(process.env.PORT) || 3000;
-  const service = new SubAgentService();
+  // Durable registry when REDIS_URL is set, in-memory otherwise. Sandbox
+  // filesystem continuity (keep VMs alive on shutdown + re-attach on restart) is
+  // a separate opt-in via SUBAGENT_REATTACH — enable only if the sandbox client
+  // can re-attach by name; otherwise restarts recreate from the stored manifest.
+  const store = await createSubAgentStore();
+  const durable = Boolean(process.env.REDIS_URL?.trim());
+  const reattachSandboxes = Boolean(process.env.SUBAGENT_REATTACH?.trim());
+  const service = new SubAgentService({ store, reattachSandboxes });
   const server = createSubAgentsServer(service);
 
   server.listen(port, () => {
@@ -194,6 +204,16 @@ async function main(): Promise<void> {
       tracing
         ? `Tracing to W&B Weave project: ${getWeaveProjectName()}`
         : "Weave tracing disabled (set WANDB_API_KEY to enable).",
+    );
+    console.log(
+      durable
+        ? "Registry: Redis (durable — agents survive restarts)."
+        : "Registry: in-memory (state is lost on restart; set REDIS_URL to persist).",
+    );
+    console.log(
+      reattachSandboxes
+        ? "Sandboxes: kept alive on shutdown; re-attach attempted on restart (SUBAGENT_REATTACH)."
+        : "Sandboxes: destroyed on shutdown; recreated from manifest on restart.",
     );
     console.log();
     console.log("Endpoints:");
@@ -204,10 +224,10 @@ async function main(): Promise<void> {
     console.log("  GET    /agents | /agents/:id | /health");
   });
 
-  // Tear down live sandbox sessions on shutdown.
+  // Close sandbox sessions (detaching when persistent) and the store on shutdown.
   const shutdown = () => {
     server.close();
-    void service.closeAll().finally(() => process.exit(0));
+    void service.close().finally(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
