@@ -3,10 +3,9 @@ import "dotenv/config";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 
-import { getWeaveProjectName, initWeave, isWeaveEnabled } from "../../src/lib/weave.js";
+import { getWeaveProjectName, initWeave, isWeaveEnabled } from "./lib/weave.js";
 import {
   DEFAULT_REPOSITORY,
-  getFixAgentStatus,
   runFixAgent,
   type FixAgentTraces,
   type RunFixAgentOptions,
@@ -16,15 +15,13 @@ import {
  * HTTP front door for the Fix Agent.
  *
  * Endpoints:
- *   POST /fix          { traces, repository?, ref?, model?, branchName?, wait?, timeoutMs?, dryRun? }
- *                      -> { summary, prUrl, agentId, agentUrl, branchName, status, pending, tracing }
- *   GET  /agents/:id   -> latest status of a launched agent (poll for the PR url)
- *   GET  /health       -> { ok, configured, tracing }
+ *   POST /fix      { traces, repository?, ref?, model?, dryRun? }
+ *                  Calls Claude to diagnose the attack, generates a fix, creates
+ *                  a branch, commits the changed files, and opens a GitHub PR.
+ *                  The PR is open for human review — it is NOT auto-merged.
+ *                  -> { prUrl, branchName, prNumber, summary, pending, tracing }
  *
- * `POST /fix` hands the attack traces to a Cursor Cloud Agent, which opens the
- * fixing PR. By default it waits (up to `timeoutMs`) for the PR url; if the
- * agent is still working when the wait elapses, it returns `pending: true`
- * along with the agent url and a poll hint — call `GET /agents/:id` to follow up.
+ *   GET  /health   -> { ok, configured, repository, tracing }
  */
 export function createFixAgentServer() {
   return createServer((req, res) => {
@@ -43,18 +40,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return json(res, 200, {
       ok: true,
       service: "fix-agent",
-      configured: Boolean(process.env.CURSOR_API_KEY?.trim()),
+      configured:
+        Boolean(process.env.ANTHROPIC_API_KEY?.trim()) &&
+        Boolean(process.env.GITHUB_TOKEN?.trim()),
       repository: DEFAULT_REPOSITORY,
       tracing: isWeaveEnabled(),
     });
-  }
-
-  // GET /agents/:id — poll a launched agent.
-  const agentMatch = /^\/agents\/([^/]+)$/.exec(url.pathname);
-  if (agentMatch) {
-    if (method !== "GET") return json(res, 405, { error: "Method not allowed" });
-    const id = decodeURIComponent(agentMatch[1]!);
-    return json(res, 200, await getFixAgentStatus(id));
   }
 
   if (url.pathname === "/fix") {
@@ -62,6 +53,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     const body = (await readJson(req)) as Record<string, unknown>;
     const traces = body.traces as FixAgentTraces | undefined;
+
     if (!hasTraces(traces)) {
       return json(res, 400, {
         error:
@@ -74,22 +66,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       repository: asString(body.repository),
       ref: asString(body.ref),
       model: asString(body.model),
-      branchName: asString(body.branchName),
-      wait: typeof body.wait === "boolean" ? body.wait : undefined,
-      timeoutMs: asNumber(body.timeoutMs),
       dryRun: body.dryRun === true,
     };
 
-    // Cancel the wait if the client hangs up — the agent keeps running remotely.
-    const controller = new AbortController();
-    req.on("close", () => controller.abort());
-    options.signal = controller.signal;
-
     const result = await runFixAgent(traces, options);
-    if (controller.signal.aborted && !res.writableEnded) {
-      res.end();
-      return;
-    }
     return json(res, 200, result);
   }
 
@@ -104,10 +84,6 @@ function hasTraces(traces: unknown): traces is FixAgentTraces {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -156,14 +132,14 @@ async function main(): Promise<void> {
         ? `Tracing to W&B Weave project: ${getWeaveProjectName()}`
         : "Weave tracing disabled (set WANDB_API_KEY to enable).",
     );
-    if (!process.env.CURSOR_API_KEY?.trim()) {
-      console.warn("[fix-agent] CURSOR_API_KEY not set — POST /fix will fail until it is.");
-    }
+    const anthropicOk = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+    const githubOk = Boolean(process.env.GITHUB_TOKEN?.trim());
+    if (!anthropicOk) console.warn("[fix-agent] ANTHROPIC_API_KEY not set — POST /fix will fail.");
+    if (!githubOk) console.warn("[fix-agent] GITHUB_TOKEN not set — POST /fix will fail.");
     console.log();
     console.log("Endpoints:");
-    console.log('  POST /fix        { "traces": ... }   launch a Cloud Agent to fix the loan agent');
-    console.log("  GET  /agents/:id                     poll a launched agent for its PR url");
-    console.log("  GET  /health                         liveness probe");
+    console.log('  POST /fix    { "traces": ... }   diagnose attack, generate fix, open GitHub PR');
+    console.log("  GET  /health                     liveness probe");
   });
 
   const shutdown = () => {

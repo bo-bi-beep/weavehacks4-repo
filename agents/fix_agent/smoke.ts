@@ -7,12 +7,8 @@ import { buildFixPrompt, runFixAgent, type AttackTrace } from "./index.js";
 /**
  * Smoke test for the Fix Agent.
  *
- *   npm run fix:smoke           # dry run: build + print the remediation prompt
- *   npm run fix:smoke -- --live # launch a real Cursor agent (needs CURSOR_API_KEY)
- *
- * The dry run touches no network and is safe to run anywhere — it verifies the
- * trace serializer and prompt builder. `--live` actually dispatches a Cloud
- * Agent (wait disabled, so it returns the agent url + branch immediately).
+ *   npm run smoke           # dry run: build + print the remediation prompt
+ *   npm run smoke -- --live # call Claude + open a real GitHub PR (needs ANTHROPIC_API_KEY + GITHUB_TOKEN)
  */
 
 const SAMPLE_ATTACK: AttackTrace = {
@@ -49,18 +45,24 @@ async function main(): Promise<void> {
     console.log("=== Fix Agent dry run ===\n");
     console.log("Sample attack trace:");
     console.log(JSON.stringify(SAMPLE_ATTACK, null, 2));
-    console.log("\n--- Generated remediation prompt for the Cloud Agent ---\n");
+    console.log("\n--- Generated remediation prompt ---\n");
     console.log(buildFixPrompt(SAMPLE_ATTACK));
-    console.log("\n(dry run — pass --live with CURSOR_API_KEY set to launch a real agent)");
+    console.log(
+      "\n(dry run — pass --live with ANTHROPIC_API_KEY + GITHUB_TOKEN set to call Claude and open a real PR)",
+    );
     return;
   }
 
   console.log("=== Fix Agent live run ===");
-  console.log("Launching a Cursor Cloud Agent (wait disabled — returns immediately)...\n");
-  const result = await runFixAgent(SAMPLE_ATTACK, { wait: false });
+  console.log(
+    "Calling Claude to diagnose the attack, generate a fix, and open a GitHub PR...\n",
+  );
+
+  const result = await runFixAgent(SAMPLE_ATTACK);
   console.log(JSON.stringify(result, null, 2));
-  if (result.agentId) {
-    console.log(`\nFollow up with: GET /agents/${result.agentId}  (or re-poll via getFixAgentStatus)`);
+
+  if (result.prUrl) {
+    console.log(`\nPR opened for human review: ${result.prUrl}`);
   }
 }
 

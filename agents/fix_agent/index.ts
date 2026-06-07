@@ -1,40 +1,22 @@
 import "dotenv/config";
 
-import { initWeave, isWeaveEnabled, weave } from "../../src/lib/weave.js";
-import {
-  CursorClient,
-  isTerminalStatus,
-  type CursorAgent,
-} from "./cursor.js";
-
-/**
- * Fix Agent — closes the red-team loop.
- *
- * Input:  the traces of a successful attack against the Loan Approval Agent
- *         (e.g. a prompt injection that flipped a DENY into an APPROVE).
- * Action: dispatch a Cursor Background (Cloud) Agent to root-cause the
- *         vulnerability and open a pull request that hardens
- *         `agents/loan_approval_agent/`.
- * Output: a human-readable summary of the fix + the URL of the PR.
- *
- * The Cloud Agent does the actual code edit remotely; this module only builds
- * the remediation brief, launches the agent, and (optionally) waits for the PR.
- */
+import Anthropic from "@anthropic-ai/sdk";
+import { initWeave, isWeaveEnabled, weave } from "./lib/weave.js";
+import { GitHubClient, type FileChange, type PrResult } from "./github.js";
 
 /** This repo on GitHub. Override with FIX_AGENT_REPO or the request body. */
 export const DEFAULT_REPOSITORY = "https://github.com/bo-bi-beep/weavehacks4-repo";
 export const LOAN_AGENT_PATH = "agents/loan_approval_agent/";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export type AttackTraceMessage = {
   role?: string;
   content?: string;
 };
 
-/**
- * One successful attack against the loan agent. Every field is optional — pass
- * whatever the trace surface gives you. Unknown shapes can go in `raw`, or you
- * can pass the whole thing as a raw string to {@link runFixAgent}.
- */
 export type AttackTrace = {
   sessionId?: string;
   username?: string;
@@ -43,7 +25,7 @@ export type AttackTrace = {
   expectedDecision?: string;
   /** The decision the attacker coerced, e.g. "approved". */
   actualDecision?: string;
-  /** Short label for the technique, e.g. "claimed inflated income + credit_score override". */
+  /** Short label for the technique used. */
   technique?: string;
   /** Link back to the W&B Weave trace for this attack. */
   weaveTraceUrl?: string;
@@ -58,56 +40,26 @@ export type RunFixAgentOptions = {
   repository?: string;
   ref?: string;
   model?: string;
-  branchName?: string;
-  /** Wait for the PR before returning. Default true. */
-  wait?: boolean;
-  /** Max time to wait for the PR (ms). Default FIX_AGENT_WAIT_MS or 10 min. */
-  timeoutMs?: number;
-  pollIntervalMs?: number;
-  signal?: AbortSignal;
-  /** Inject a client (tests / custom config). */
-  client?: CursorClient;
-  /** Build the prompt and return it without launching anything. */
+  /** Build the prompt and return it without calling Claude or GitHub. */
   dryRun?: boolean;
+  anthropicApiKey?: string;
+  githubToken?: string;
 };
 
 export type FixAgentResult = {
-  agentId?: string;
-  /** Cursor web URL to watch the agent. */
-  agentUrl?: string;
-  branchName?: string;
-  status?: string;
-  /** The GitHub pull request URL, once the agent has opened it. */
-  prUrl?: string;
-  /** Human-readable summary of the fix (the agent's final message, when ready). */
+  prUrl: string;
+  branchName: string;
+  prNumber: number;
+  /** Human-readable summary of the fix — shown to the reviewer on the PR. */
   summary: string;
-  /** True when the PR isn't ready yet — poll `GET /agents/:id` to follow up. */
-  pending: boolean;
+  pending: false;
   /** Present only on dry runs. */
   prompt?: string;
   tracing: boolean;
 };
 
-function defaultTimeoutMs(): number {
-  const fromEnv = Number(process.env.FIX_AGENT_WAIT_MS);
-  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 600_000;
-}
-
-function envOr(name: string, fallback: string): string {
-  const value = process.env[name]?.trim();
-  return value ? value : fallback;
-}
-
-function resolveRepository(opts: RunFixAgentOptions): string {
-  return opts.repository ?? envOr("FIX_AGENT_REPO", DEFAULT_REPOSITORY);
-}
-
-function resolveRef(opts: RunFixAgentOptions): string {
-  return opts.ref ?? envOr("FIX_AGENT_REF", "main");
-}
-
 // ---------------------------------------------------------------------------
-// Prompt construction
+// Trace serialization
 // ---------------------------------------------------------------------------
 
 function formatTrace(trace: AttackTrace, index: number): string {
@@ -168,59 +120,121 @@ ${tracesBlock}
    - Validate/clamp user-supplied updatable fields and reject implausible self-reported values.
 3. Do NOT weaken legitimate flows: applicants who should be approved (e.g. alice) must still be approved, and the per-category breakdown plus \`expected_decision\` behavior must be preserved.
 4. Preserve W&B Weave instrumentation (\`import weave\`, traced calls). Do not remove tracing.
-5. Keep the change tightly scoped to \`${targetPath}\`. Do not touch unrelated subsystems (attack-kb, main_agent, sub_agents, etc.).
-6. If feasible, add a regression test that replays this attack and asserts the decision stays DENIED.
+5. Keep the change tightly scoped to \`${targetPath}\`. Do not touch unrelated subsystems.
 
 ## Deliverable
-- Open a pull request with a clear title (e.g. "Fix prompt-injection deny→approve bypass in loan approval agent") and a description covering root cause, fix, and verification.
-- End your final message with a concise **Fix Summary** (3–6 sentences) describing the root cause and the change, suitable for showing to a reviewer.`;
+Respond in two parts:
+
+**Part 1 — Analysis**: Explain the root cause and fix in plain English (3–6 sentences).
+
+**Part 2 — Changes**: Output a single JSON block fenced with \`\`\`json ... \`\`\` containing:
+\`\`\`json
+{
+  "branch_name": "fix/loan-approval-deny-approve-bypass",
+  "pr_title": "Fix: harden loan approval agent against mutable-field manipulation",
+  "pr_body": "## Root cause\\n...\\n## Fix\\n...\\n## Verification\\n...",
+  "summary": "3-6 sentence description of root cause and fix for reviewers.",
+  "changes": [
+    {
+      "path": "agents/loan_approval_agent/agent.py",
+      "content": "<<COMPLETE new file content — not a diff>>"
+    }
+  ]
+}
+\`\`\`
+
+The \`content\` field must be the **complete new file content**, not a diff or partial snippet.`;
 }
 
 // ---------------------------------------------------------------------------
-// Orchestration
+// Claude API
 // ---------------------------------------------------------------------------
 
-/** Best-effort: the agent's last assistant message doubles as the fix summary. */
-async function fetchSummary(client: CursorClient, id: string): Promise<string> {
-  try {
-    const convo = await client.getConversation(id);
-    const assistant = convo.messages.filter(
-      (m) => m.type === "assistant" && (m.text ?? "").trim(),
+type ClaudeFix = {
+  branch_name: string;
+  pr_title: string;
+  pr_body: string;
+  summary: string;
+  changes: FileChange[];
+};
+
+function parseClaudeFix(text: string): ClaudeFix {
+  const match = text.match(/```json\s*([\s\S]*?)```/);
+  if (!match?.[1]) {
+    throw new Error(
+      "Claude did not return a ```json ... ``` block with file changes. " +
+        "Raw response (first 500 chars): " +
+        text.slice(0, 500),
     );
-    const last = assistant[assistant.length - 1];
-    return last?.text?.trim() ?? "";
-  } catch {
-    return "";
   }
-}
 
-function buildResult(agent: CursorAgent, summary: string): FixAgentResult {
-  const prUrl = agent.target?.prUrl;
-  const pending = !prUrl;
+  const parsed = JSON.parse(match[1].trim()) as Partial<ClaudeFix>;
 
-  const fallback = prUrl
-    ? `Cursor background agent ${agent.id} opened a pull request hardening the loan approval agent against the attack.`
-    : `Cursor background agent ${agent.id} is still working (status: ${agent.status}). ` +
-      `Watch it at ${agent.target?.url ?? "the Cursor dashboard"}; the pull request URL appears here once the branch is pushed. ` +
-      `Poll GET /agents/${agent.id} to follow up.`;
+  if (!Array.isArray(parsed.changes) || parsed.changes.length === 0) {
+    throw new Error("Claude returned no file changes in the JSON block.");
+  }
 
+  const ts = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   return {
-    agentId: agent.id,
-    agentUrl: agent.target?.url,
-    branchName: agent.target?.branchName,
-    status: agent.status,
-    prUrl,
-    summary: summary || fallback,
-    pending,
-    tracing: isWeaveEnabled(),
+    branch_name: parsed.branch_name || `fix/loan-approval-${ts}`,
+    pr_title: parsed.pr_title || "Fix loan approval agent vulnerability",
+    pr_body: parsed.pr_body || "",
+    summary: parsed.summary || "",
+    changes: parsed.changes,
   };
 }
 
-/**
- * Launch a Cloud Agent to fix the loan approval agent from attack traces.
- * Weave-traced (the prompt and result land in the trace; the API key never does
- * — the client is closed over, not passed as a logged argument).
- */
+async function callClaude(
+  prompt: string,
+  model: string,
+  apiKey: string,
+): Promise<{ text: string; fix: ClaudeFix }> {
+  const client = new Anthropic({ apiKey });
+
+  const message = await client.messages.create({
+    model,
+    max_tokens: 8192,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const text = message.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { type: "text"; text: string }).text)
+    .join("\n");
+
+  const fix = parseClaudeFix(text);
+  return { text, fix };
+}
+
+// ---------------------------------------------------------------------------
+// GitHub PR creation
+// ---------------------------------------------------------------------------
+
+async function applyFix(
+  fix: ClaudeFix,
+  repository: string,
+  baseRef: string,
+  githubToken: string,
+): Promise<PrResult> {
+  const github = new GitHubClient(githubToken, repository);
+  const base = baseRef || (await github.getDefaultBranch());
+
+  // Append timestamp to avoid branch-name collisions on repeated runs.
+  const branchName = `${fix.branch_name}-${Date.now()}`.slice(0, 100);
+
+  await github.createBranch(branchName, base);
+
+  for (const change of fix.changes) {
+    await github.commitFile(change.path, change.content, branchName, fix.pr_title);
+  }
+
+  return github.openPr(fix.pr_title, fix.pr_body, branchName, base);
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
 export async function runFixAgent(
   traces: FixAgentTraces,
   options: RunFixAgentOptions = {},
@@ -228,73 +242,49 @@ export async function runFixAgent(
   await initWeave();
 
   const prompt = buildFixPrompt(traces);
-  const repository = resolveRepository(options);
-  const ref = resolveRef(options);
 
   if (options.dryRun) {
     return {
-      summary: "(dry run — no Cursor agent launched)",
+      prUrl: "",
+      branchName: "",
+      prNumber: 0,
+      summary: "(dry run — Claude not called)",
       pending: false,
       prompt,
       tracing: isWeaveEnabled(),
     };
   }
 
-  const client = options.client ?? new CursorClient();
-  const wait = options.wait ?? true;
-  const timeoutMs = options.timeoutMs ?? defaultTimeoutMs();
+  const anthropicApiKey = options.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? "";
+  const githubToken = options.githubToken ?? process.env.GITHUB_TOKEN ?? "";
+  const repository = options.repository ?? process.env.FIX_AGENT_REPO ?? DEFAULT_REPOSITORY;
+  const ref = options.ref ?? process.env.FIX_AGENT_REF ?? "main";
+  const model = options.model ?? process.env.FIX_AGENT_MODEL ?? "claude-sonnet-4-6";
+
+  if (!anthropicApiKey) throw new Error("ANTHROPIC_API_KEY is required but not set.");
+  if (!githubToken) throw new Error("GITHUB_TOKEN is required but not set.");
 
   const run = weave.op(
     async function fixLoanApprovalAgent(input: {
       prompt: string;
+      model: string;
       repository: string;
       ref: string;
-      model?: string;
-      branchName?: string;
-      wait: boolean;
-      timeoutMs: number;
     }): Promise<FixAgentResult> {
-      const launched = await client.launchAgent({
-        prompt: input.prompt,
-        repository: input.repository,
-        ref: input.ref,
-        model: input.model,
-        branchName: input.branchName,
-        autoCreatePr: true,
-      });
+      const { fix } = await callClaude(input.prompt, input.model, anthropicApiKey);
+      const pr = await applyFix(fix, input.repository, input.ref, githubToken);
 
-      let agent = launched;
-      if (input.wait && !isTerminalStatus(launched.status)) {
-        agent = await client.waitForAgent(launched.id, {
-          timeoutMs: input.timeoutMs,
-          pollIntervalMs: options.pollIntervalMs,
-          signal: options.signal,
-        });
-      }
-
-      const summary = await fetchSummary(client, agent.id);
-      return buildResult(agent, summary);
+      return {
+        prUrl: pr.prUrl,
+        branchName: pr.branchName,
+        prNumber: pr.prNumber,
+        summary: fix.summary || fix.pr_title,
+        pending: false,
+        tracing: isWeaveEnabled(),
+      };
     },
     { name: "fixLoanApprovalAgent" },
   );
 
-  return run({
-    prompt,
-    repository,
-    ref,
-    model: options.model,
-    branchName: options.branchName,
-    wait,
-    timeoutMs,
-  });
-}
-
-/** Fetch the current state of a previously-launched fix agent (for polling). */
-export async function getFixAgentStatus(
-  id: string,
-  client: CursorClient = new CursorClient(),
-): Promise<FixAgentResult> {
-  const agent = await client.getAgent(id);
-  const summary = await fetchSummary(client, id);
-  return buildResult(agent, summary);
+  return run({ prompt, model, repository, ref });
 }

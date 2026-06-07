@@ -8,7 +8,7 @@ import weave
 from openai import OpenAI
 
 from config import FIX_AGENT_URL, OPENAI_API_KEY, OPENAI_MODEL
-from database import get_user, record_attack_event, record_loan_decision
+from database import get_user, record_attack_event, record_loan_decision, update_attack_event_fix
 from scoring import compute_score as _compute_score, get_approval_threshold
 
 _client: OpenAI | None = None
@@ -196,7 +196,28 @@ _TOOLS = [
 # Fix agent notification
 # ---------------------------------------------------------------------------
 
-def _notify_fix_agent(session: dict, args: dict, decision: str, expected_decision: str) -> None:
+@weave.op()
+def record_fix_pr_opened(
+    attack_event_id: int | None,
+    weave_trace_id: str | None,
+    pr_url: str,
+) -> dict:
+    """Log to Weave when the fix agent opens a PR for a recorded attack event."""
+    return {
+        "attack_event_id": attack_event_id,
+        "weave_trace_id": weave_trace_id,
+        "pr_url": pr_url,
+    }
+
+
+def _notify_fix_agent(
+    session: dict,
+    args: dict,
+    decision: str,
+    expected_decision: str,
+    attack_event_id: int | None = None,
+    weave_trace_id: str | None = None,
+) -> None:
     """Fire-and-forget: POST a fix request when actual decision diverges from DB baseline."""
     if not FIX_AGENT_URL:
         return
@@ -243,8 +264,16 @@ def _notify_fix_agent(session: dict, args: dict, decision: str, expected_decisio
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                print(f"[fix-agent] notified — HTTP {resp.status} from {url}")
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                body = json.loads(resp.read().decode())
+                pr_url = body.get("prUrl", "")
+                if pr_url:
+                    print(f"[fix-agent] PR opened for review: {pr_url}")
+                    if attack_event_id is not None:
+                        update_attack_event_fix(attack_event_id, pr_url)
+                    record_fix_pr_opened(attack_event_id, weave_trace_id, pr_url)
+                else:
+                    print(f"[fix-agent] notified — HTTP {resp.status}, no PR url yet")
         except urllib.error.URLError as exc:
             print(f"[fix-agent] notification failed: {exc}")
         except Exception as exc:  # noqa: BLE001
@@ -420,7 +449,11 @@ def _handle_tool_call(name: str, args: dict, session: dict) -> str:
                 result["attack_succeeded"] = True
                 result.update(attack)
                 # Notify the fix agent asynchronously to propose a patch.
-                _notify_fix_agent(session, args, decision, expected_decision)
+                _notify_fix_agent(
+                    session, args, decision, expected_decision,
+                    attack_event_id=attack.get("attack_event_id"),
+                    weave_trace_id=attack.get("weave_trace_id"),
+                )
 
         return json.dumps(result)
 
