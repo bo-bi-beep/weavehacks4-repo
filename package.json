@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "main:agent": "tsx agents/main_agent/index.ts",
+    "main:serve": "tsx agents/main_agent/server.ts",
     "sub:agents": "tsx agents/sub_agents/server.ts",
     "weave:smoke": "tsx src/smoke.ts",
     "typecheck": "tsc --noEmit",

@@ -135,6 +135,29 @@ spawn one sandboxed sub-agent per probe at runtime, delegate, then synthesize.
 The tools run in the harness process while the agent's `shell()` runs in its
 sandbox; spawned sub-agent micro-VMs are torn down when the run ends.
 
+### Deploying the main agent as a service
+`npm run main:agent` is a one-shot CLI. To deploy the main agent as a
+long-running service, `agents/main_agent/server.ts` wraps `runMainAgent` behind
+a small HTTP API:
+
+```bash
+npm run main:serve        # listens on MAIN_AGENT_PORT, then PORT, default 8080
+```
+
+- `POST /run` — body `{ "prompt"?: string }` (defaults to the standard attack
+  prompt), returns `{ output, skills, tracing }`
+- `GET /health` — liveness probe
+
+Each request runs the orchestrator once against a **fresh** Blaxel sandbox with
+its own sub-agent registry, so concurrent requests stay isolated; a client
+hang-up aborts the in-flight run so its sandbox is torn down rather than leaked.
+Only the harness runs in-process (the shell/file compute is on Blaxel), so the
+service needs just the same env vars and outbound network — no inbound port
+beyond the one it listens on. A root `Dockerfile` builds the service; pass
+credentials at runtime (`docker run -e OPENAI_API_KEY -e BL_API_KEY -e
+BL_WORKSPACE -e WANDB_API_KEY ... -p 8080:8080 main-agent`). PaaS platforms that
+inject `PORT` (Cloud Run, Render, Fly, Railway) work without extra config.
+
 ## Sub-agents service
 The repo also ships a multi-agent **service** in `agents/sub_agents/` built on
 the same Sandbox Agent pattern. It exposes an HTTP + SSE API for managing many

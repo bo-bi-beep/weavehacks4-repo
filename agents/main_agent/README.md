@@ -75,8 +75,10 @@ run.
 
 ## Files
 
-- `index.ts` — manifest, agent definition (with sub-agent tools), and the
-  runnable CLI entry point.
+- `index.ts` — manifest, the `createMainAgent(service)` factory (and a default
+  `mainAgent`), the `runMainAgent` entry point, and the runnable CLI.
+- `server.ts` — `createMainAgentServer()`: the HTTP wrapper (`POST /run`,
+  `GET /health`) that makes the one-shot agent deployable as a service.
 - `sub_agent_tools.ts` — `createSubAgentTools(service)`: wraps a
   `SubAgentService` as the function tools above.
 
@@ -92,6 +94,51 @@ npm run main:agent -- "try a prompt-injection attack against the loan agent as d
 With no prompt it defaults to reading the `loan-approval-agent` skill and
 attacking the Loan Approval Agent, reporting every vulnerability it finds.
 
+## Deploy as an HTTP service
+
+`npm run main:agent` is a **one-shot CLI** — it runs once and exits. To deploy
+the main agent as a long-running service, `server.ts` wraps `runMainAgent`
+behind a tiny `node:http` API (mirroring `agents/sub_agents/server.ts`):
+
+```bash
+npm run main:serve   # listens on MAIN_AGENT_PORT, then PORT, default 8080
+```
+
+| Method & path | Body | Returns |
+| --- | --- | --- |
+| `POST /run` | `{ "prompt"?: string }` (defaults to the standard attack prompt) | `{ output, skills, tracing }` |
+| `GET /health` | — | `{ ok, skills, tracing }` |
+
+```bash
+curl -s localhost:8080/health
+curl -s localhost:8080/run -X POST -H 'content-type: application/json' \
+  -d '{"prompt":"try a prompt-injection attack against the loan agent as dave"}'
+```
+
+**Concurrency-safe by design.** `runMainAgent` builds a *fresh*
+`SubAgentService` and `SandboxAgent` per call (via the exported
+`createMainAgent(service)` factory), so two requests never share a sub-agent
+registry or tear down each other's sandboxes. A client hang-up aborts the
+in-flight run (`AbortSignal` wired to the request's `close` event) so its Blaxel
+sandbox is torn down instead of leaking.
+
+**Deployability.** Only the harness runs in this process; the shell/file compute
+runs on Blaxel micro-VMs. So the service needs only the same env vars and
+*outbound* network — no inbound port beyond the one it listens on. The repo's
+root `Dockerfile` builds this service:
+
+```bash
+docker build -t main-agent .
+docker run --rm -p 8080:8080 \
+  -e OPENAI_API_KEY -e BL_API_KEY -e BL_WORKSPACE \
+  -e WANDB_API_KEY -e WANDB_ENTITY -e WANDB_PROJECT \
+  main-agent
+```
+
+Platforms that inject `PORT` (Cloud Run, Render, Fly, Railway) work without
+extra config; set `MAIN_AGENT_PORT` to override locally (the sub-agents service
+defaults to `3000`, so the two don't collide).
+
 ## Env vars
 
 - `OPENAI_API_KEY` — required (model calls)
@@ -103,6 +150,7 @@ attacking the Loan Approval Agent, reporting every vulnerability it finds.
 - `BLAXEL_SANDBOX_MEMORY` — optional MB, defaults to `4096`
 - `BLAXEL_SANDBOX_REGION` — optional, defaults to `us-pdx-1` (US West); also `eu-lon-1`, `us-was-1`
 - `BLAXEL_SANDBOX_NAME` — optional
+- `MAIN_AGENT_PORT` / `PORT` — HTTP service port (`server.ts` only); defaults to `8080`
 - `WANDB_API_KEY` / `WANDB_ENTITY` / `WANDB_PROJECT` — Weave tracing
 
 The sandbox runs remotely on Blaxel, so no special host is required. Get
@@ -111,9 +159,21 @@ The sandbox runs remotely on Blaxel, so no special host is required. Get
 
 ## Reuse
 
-`mainAgent` and `runMainAgent` are exported, so sub-agents and orchestration
-code can import them instead of re-running the CLI:
+`runMainAgent`, `createMainAgent`, and a default `mainAgent` are exported, so
+sub-agents and orchestration code can import them instead of re-running the CLI:
 
 ```ts
-import { mainAgent, runMainAgent } from "../main_agent/index.js";
+import { runMainAgent, createMainAgent, mainAgent } from "../main_agent/index.js";
+
+// Concurrency-safe one-shot run (fresh service + agent + sandbox per call):
+const report = await runMainAgent("attack the loan agent as dave");
+
+// Or build an agent bound to your own SubAgentService for custom orchestration:
+import { SubAgentService } from "../sub_agents/service.js";
+const agent = createMainAgent(new SubAgentService());
 ```
+
+`runMainAgent(prompt, { signal })` accepts an optional `AbortSignal` to cancel an
+in-flight run; the default `mainAgent` singleton is kept for backwards-compatible
+imports but shares one registry, so prefer `runMainAgent`/`createMainAgent` for
+concurrent use.
