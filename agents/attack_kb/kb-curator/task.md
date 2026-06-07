@@ -1,0 +1,1 @@
+Convert only triage-accepted retrieved source packets into derived KB artifacts with source citations. Do not create source_artifact records by default and do not directly connect to Redis from the sandbox.

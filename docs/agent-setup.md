@@ -20,13 +20,62 @@ Set these locally before launching your agent:
 ```bash
 export WANDB_API_KEY=your-wandb-api-key
 export WANDB_ENTITY=your-wandb-entity
-export WANDB_PROJECT=weavehacks4-your-idea
+export WANDB_PROJECT=weavehacks4-attack-kb
 export OPENAI_API_KEY=your-openai-api-key
 export MAIN_AGENT_MODEL=gpt-5.5   # Main Agent (orchestrator) model
 export OPENAI_MODEL=gpt-5.4-mini  # sub-agents' model
-# Blaxel sandbox (compute backend for agents/main_agent)
+
+# Blaxel sandbox (compute backend for agents/main_agent, agents/sub_agents,
+# and live Attack KB sandbox agents)
 export BL_API_KEY=your-blaxel-api-key
 export BL_WORKSPACE=your-blaxel-workspace
+
+# Attack KB fleet: OpenAI powers model calls; W&B powers Weave traces.
+export ATTACK_KB_LLM_PROVIDER=openai
+export ATTACK_KB_SOURCE_GATHERING_MODEL=gpt-5.4-mini
+export ATTACK_KB_CREDIBILITY_TRIAGE_MODEL=gpt-5.5
+export ATTACK_KB_CURATOR_MODEL=gpt-5.5
+export ATTACK_KB_RECOMMENDER_MODEL=gpt-5.5
+
+# Optional Attack KB LLM cache. Use langcache when the managed Redis LangCache service is configured.
+export ATTACK_KB_LLM_CACHE=disabled # disabled | local | redis | langcache
+export ATTACK_KB_LLM_CACHE_TTL_SECONDS=86400
+export LANGCACHE_HOST=
+export LANGCACHE_CACHE_ID=
+export LANGCACHE_API_KEY=
+
+# P0 main-agent Iris/vector-hybrid retrieval. Keep local for no-network deterministic demos;
+# use redis/auto when Redis Cloud/Stack with RediSearch is configured.
+# REDIS_URL is enough; component-specific Redis URLs are optional overrides.
+export ATTACK_KB_VECTOR_BACKEND=local # local | redis | auto
+export ATTACK_KB_EMBEDDING_PROVIDER=deterministic
+export ATTACK_KB_VECTOR_INDEX=attack-kb-vector
+export ATTACK_KB_VECTOR_DIMENSIONS=384
+```
+
+## Attack KB runtime
+
+The Attack KB subagent fleet uses both keys:
+
+- `OPENAI_API_KEY` for direct OpenAI API model calls
+- `WANDB_API_KEY` for W&B Weave tracing/logging
+
+Each subagent role can use a different model via its own env var. Check local config without making a model call:
+
+```bash
+npm run attack-kb:config
+```
+
+Check the Attack KB sandbox configuration without launching Blaxel or making a model call:
+
+```bash
+npm run attack-kb:sandbox-smoke
+```
+
+Run one optional traced smoke call, which consumes OpenAI API usage and logs to Weave. If `ATTACK_KB_LLM_CACHE=local`, `redis`, or `langcache`, the recommendation-builder smoke path is wrapped by the cache seam using the `recommendation-explanation` task scope. Validate managed LangCache first with `npm run attack-kb:langcache-smoke -- --flush`:
+
+```bash
+npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 ```
 
 ## Claude Code
@@ -180,7 +229,18 @@ for Weave tracing) and works from any host. `BLAXEL_SANDBOX_NAME`, if set, is
 used as a per-agent name prefix. See `agents/sub_agents/README.md` for the full
 API and curl examples.
 
+Attack KB live sandbox agents use the same in-process `SubAgentService` pattern
+through `attack-kb/src/sandbox.ts`. Deterministic Attack KB demos/evals do not
+launch Blaxel; use `npm run attack-kb:sandbox-smoke` to inspect the sandbox config
+and missing live-launch env vars.
+
+For the current recommendation handoff, start the Attack KB server with
+`npm run attack-kb:server` and have the main agent use `.agents/skills/use-attack-kb/SKILL.md`.
+That skill spawns a recommendation-fetcher subagent that calls
+`POST /api/recommendations` and returns the W&B/Weave-traced recommendation packet.
+See `attack-kb/docs/attack-kb-recommendation-setup.md` for the full setup and smoke test.
+
 ## Notes
-- No secrets are committed; all MCP files expect your local `WANDB_API_KEY`.
+- No secrets are committed; all MCP files expect your local `WANDB_API_KEY`, and Attack KB model calls expect your local `OPENAI_API_KEY`.
 - If an agent does not pick up a new config file, restart it from the repo root.
 - For broad W&B help beyond this repo's custom skill, the official package is `wandb/skills`.

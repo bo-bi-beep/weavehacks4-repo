@@ -9,6 +9,7 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - Python `SubAgentManager` for parallel FinTech loan-agent red teaming in `agents/sub_agent_manager.py`
 - Adversarial OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` (`npm run main:agent` for the one-shot CLI, `npm run main:serve` for the HTTP service) that attacks the Loan Approval Agent for vulnerabilities, loads the `loan-approval-agent` skill by default (`MAIN_AGENT_SKILLS` to override), and can orchestrate sub-agents as tools
 - Sub-agents service in `agents/sub_agents/` — used both as an HTTP/SSE API (`npm run sub:agents`) and in-process as the main agent's sub-agent tools
+- Attack KB subsystem under `attack-kb/`, with Redis-backed retrieval, Blaxel recommendationBuilder, and W&B Weave tracing
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
 - Agent setup docs in `docs/agent-setup.md`
@@ -20,6 +21,12 @@ cp .env.example .env
 npm install
 npm run typecheck
 npm run weave:smoke -- "an agent with visible evals and traces"
+npm run attack-kb:config
+npm run attack-kb:redis-health
+npm run attack-kb:probe
+npm run attack-kb:evals
+npm run attack-kb:sandbox-smoke
+npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"
 npm run dev -- "help me turn inbox triage into a weekend demo"
 ```
 
@@ -45,16 +52,37 @@ python3.10 -m agents.main_agent.main_agent_module.trace_exporter \
 
 ## Env vars
 Fill in:
-- `WANDB_API_KEY`
+- `WANDB_API_KEY` — used by W&B Weave tracing/logging
 - `WANDB_ENTITY`
 - `WANDB_PROJECT`
-- `OPENAI_API_KEY`
-- `BL_API_KEY` / `BL_WORKSPACE` (Blaxel sandbox — needed for `npm run main:agent` and `npm run sub:agents`)
+- `OPENAI_API_KEY` — used for direct OpenAI model calls
+- `BL_API_KEY` / `BL_WORKSPACE` — Blaxel sandbox, needed for `npm run main:agent`, `npm run sub:agents`, and live Attack KB sandbox agents
 - optional: `OPENAI_MODEL`, `BLAXEL_SANDBOX_IMAGE`, `BLAXEL_SANDBOX_MEMORY`, `BLAXEL_SANDBOX_REGION`
+- optional Attack KB Redis report/storage vars: `ATTACK_KB_STORAGE_ADAPTER`, `ATTACK_KB_REDIS_IRIS_URL`, `ATTACK_KB_REDIS_IRIS_INDEX`, `ATTACK_KB_REDIS_IRIS_NAMESPACE`, `ATTACK_KB_REDIS_KEY_PREFIX`, `ATTACK_KB_REDIS_HEALTH_CONNECT`
+
+Attack KB per-agent model overrides:
+- `ATTACK_KB_LLM_PROVIDER=openai`
+- `ATTACK_KB_SOURCE_GATHERING_MODEL`
+- `ATTACK_KB_CREDIBILITY_TRIAGE_MODEL`
+- `ATTACK_KB_CURATOR_MODEL`
+- `ATTACK_KB_RECOMMENDER_MODEL`
+
+Attack KB optional LLM cache:
+- `ATTACK_KB_LLM_CACHE=disabled|local|redis`
+- `ATTACK_KB_LLM_CACHE_TTL_SECONDS`
+- `ATTACK_KB_REDIS_CACHE_URL`
+
+No secrets should be committed. Put real values in local `.env` only.
 
 ## Handy commands
 - `npm run typecheck`
 - `npm run weave:smoke -- "idea"`
+- `npm run attack-kb:config` — verifies `OPENAI_API_KEY` + `WANDB_API_KEY` presence and prints selected subagent models
+- `npm run attack-kb:redis-health` — prints sanitized Redis config/readiness and intended key/index/stream names without connecting by default
+- `npm run attack-kb:probe` — returns deterministic probing recommendations for an empty credit-loan profile, no API keys required
+- `npm run attack-kb:evals` — runs deterministic quality evals; traces to W&B Weave when `WANDB_API_KEY` is set
+- `npm run attack-kb:sandbox-smoke` — prints the Blaxel/SubAgentService sandbox config for an Attack KB role without launching Blaxel
+- `npm run attack-kb:smoke -- "prompt"` — makes one traced OpenAI call through the Attack KB recommendation-builder runtime unless the optional exact-key LLM cache hits
 - `npm run dev -- "problem statement"`
 - `npm run main:agent -- "task for the sandbox agent"` (one-shot CLI)
 - `npm run main:serve` (main agent as an HTTP service on `MAIN_AGENT_PORT`/`PORT`, default `8080`)
@@ -109,6 +137,7 @@ evals/    datasets and evaluation scripts
 scripts/  setup/dev helpers
 docs/     hackathon notes, submission copy, demo plan
 src/      starter app code with Weave instrumentation
+attack-kb/ Attack KB subsystem code, docs, seeds, evals, and prototypes
 ```
 
 ## Hackathon reminders
