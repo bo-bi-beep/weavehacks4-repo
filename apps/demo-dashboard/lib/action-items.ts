@@ -402,13 +402,14 @@ export function getActionPanelSummary(
 export function filterVulnerabilities(
   findings: Vulnerability[],
   filters: VulnerabilityFilters,
+  items: ActionItem[] = actionItems,
 ): Vulnerability[] {
   return findings.filter((item) => {
     if (filters.attackFamily && item.attackFamily !== filters.attackFamily) return false;
     if (filters.source && item.source !== filters.source) return false;
     if (filters.systemTag && !item.systemTags.includes(filters.systemTag)) return false;
     if (filters.status) {
-      const relatedItems = actionItems.filter((action) =>
+      const relatedItems = items.filter((action) =>
         item.relatedActionItemIds.includes(action.id),
       );
       if (!relatedItems.some((action) => action.status === filters.status)) return false;
@@ -420,12 +421,13 @@ export function filterVulnerabilities(
 export function sortVulnerabilities(
   findings: Vulnerability[],
   sort: VulnerabilitySort,
+  items: ActionItem[] = actionItems,
 ): Vulnerability[] {
   return [...findings].sort((a, b) => {
     if (sort === "affected_systems") return b.systemTags.length - a.systemTags.length;
     if (sort === "status") {
-      const aStatus = getHighestPriorityStatus(a.relatedActionItemIds);
-      const bStatus = getHighestPriorityStatus(b.relatedActionItemIds);
+      const aStatus = getHighestPriorityStatus(a.relatedActionItemIds, items);
+      const bStatus = getHighestPriorityStatus(b.relatedActionItemIds, items);
       return statusRank[aStatus] - statusRank[bStatus];
     }
 
@@ -444,8 +446,8 @@ export function applyActionItemFix(items: ActionItem[], actionItemId: string): A
   );
 }
 
-function getHighestPriorityStatus(actionItemIds: string[]): ActionStatus {
-  const statuses = actionItems
+function getHighestPriorityStatus(actionItemIds: string[], items: ActionItem[]): ActionStatus {
+  const statuses = items
     .filter((item) => actionItemIds.includes(item.id))
     .map((item) => item.status);
 

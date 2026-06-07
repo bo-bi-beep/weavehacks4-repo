@@ -9,7 +9,7 @@ import {
   filterVulnerabilities,
   getActionPanelSummary,
   sortVulnerabilities,
-  vulnerabilities,
+  vulnerabilities as initialVulnerabilities,
   type ActionItem,
   type ActionStatus,
   type Vulnerability,
@@ -17,8 +17,6 @@ import {
   type VulnerabilitySort,
 } from "../lib/action-items";
 
-const attackFamilies = ["all", ...Array.from(new Set(vulnerabilities.map((item) => item.attackFamily)))];
-const systemTags = ["all", ...Array.from(new Set(vulnerabilities.flatMap((item) => item.systemTags)))];
 const panelTransitionMs = 240;
 
 const shortLabels: Record<string, string> = {
@@ -37,8 +35,18 @@ const shortLabels: Record<string, string> = {
   weave_trace: "Weave trace",
 };
 
-export function ActionItemsPanel() {
-  const [items, setItems] = useState<ActionItem[]>(initialActionItems);
+type ActionItemsPanelProps = {
+  actionItems?: ActionItem[];
+  vulnerabilities?: Vulnerability[];
+  dataLabel?: string;
+};
+
+export function ActionItemsPanel({
+  actionItems = initialActionItems,
+  vulnerabilities = initialVulnerabilities,
+  dataLabel = "Weave traces",
+}: ActionItemsPanelProps) {
+  const [items, setItems] = useState<ActionItem[]>(actionItems);
   const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
   const [selectedVulnerabilityId, setSelectedVulnerabilityId] = useState<string | null>(null);
   const [isVulnerabilityPanelOpen, setIsVulnerabilityPanelOpen] = useState(false);
@@ -53,26 +61,44 @@ export function ActionItemsPanel() {
     items.find((item) => item.id === selectedActionId) ?? null;
   const replayVulnerability =
     vulnerabilities.find((item) => item.id === replayVulnerabilityId) ?? null;
+  const attackFamilies = useMemo(
+    () => ["all", ...Array.from(new Set(vulnerabilities.map((item) => item.attackFamily)))],
+    [vulnerabilities],
+  );
+  const systemTags = useMemo(
+    () => ["all", ...Array.from(new Set(vulnerabilities.flatMap((item) => item.systemTags)))],
+    [vulnerabilities],
+  );
 
   const visibleVulnerabilities = useMemo(() => {
     const filtered = filterVulnerabilities(vulnerabilities, {
       attackFamily: attackFamily === "all" ? undefined : attackFamily,
       systemTag: systemTag === "all" ? undefined : systemTag,
       source: "real_weave_trace",
-    });
+    }, items);
 
     const related = selectedAction
       ? filtered.filter((item) => selectedAction.vulnerabilityIds.includes(item.id))
       : [];
 
-    return sortVulnerabilities(related, sort);
-  }, [attackFamily, selectedAction, sort, systemTag]);
+    return sortVulnerabilities(related, sort, items);
+  }, [attackFamily, items, selectedAction, sort, systemTag, vulnerabilities]);
 
   const summary = getActionPanelSummary(items, vulnerabilities);
 
   useEffect(() => {
     return () => clearCloseTimer();
   }, []);
+
+  useEffect(() => {
+    clearCloseTimer();
+    setItems(actionItems);
+    setSelectedActionId(null);
+    setSelectedVulnerabilityId(null);
+    setIsVulnerabilityPanelOpen(false);
+    setActiveProposalId(null);
+    setReplayVulnerabilityId(null);
+  }, [actionItems]);
 
   function clearCloseTimer() {
     if (!closeTimerRef.current) return;
@@ -126,7 +152,7 @@ export function ActionItemsPanel() {
     <main className="action-panel-shell">
       <section className="action-panel-hero">
         <div>
-          <p className="eyebrow">Weave traces</p>
+          <p className="eyebrow">{dataLabel}</p>
           <h1>Fix Queue</h1>
         </div>
         <div className="action-summary-grid" aria-label="Action panel summary">
