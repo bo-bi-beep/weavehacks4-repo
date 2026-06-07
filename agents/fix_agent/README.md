@@ -3,19 +3,23 @@
 Closes the red-team loop. Give it the **traces of a successful attack** against
 the [Loan Approval Agent](../loan_approval_agent/) (e.g. a prompt injection that
 flipped a **DENY into an APPROVE**) and it uses **Claude** to root-cause the
-vulnerability and propose a code fix.
-
-The fix is a **two-step, human-in-the-loop process**:
+vulnerability, generates a code fix, and opens a **GitHub pull request** for
+human review.
 
 ```
-1. POST /fix   ──▶  Claude analyzes the attack, generates proposed file changes
-                    (no GitHub touched — human reviews the proposal)
-
-2. POST /fix/apply  ──▶  Human approves → fix-agent creates branch,
-                         commits the fixed files, opens the GitHub PR
+attack traces ──▶ Fix Agent ──▶ Claude (analysis + code fix)
+                                      │
+                                      ▼  GitHub REST API
+                          creates branch, commits fixed files,
+                                    opens a PR
+                                      │
+                                      ▼
+                   { prUrl }  ◀── human reviews + approves/rejects on GitHub
 ```
 
-Every run is traced through W&B Weave (`proposeFixLoanApprovalAgent` op).
+The PR is opened automatically but **never auto-merged** — a human reviews the
+diff on GitHub and decides to approve or close it. Every run is traced through
+W&B Weave (`fixLoanApprovalAgent` op).
 
 ## Run it
 
@@ -23,11 +27,8 @@ Every run is traced through W&B Weave (`proposeFixLoanApprovalAgent` op).
 # Dry run — build + print the remediation prompt (no network calls)
 npm run smoke
 
-# Call Claude + print proposal (needs ANTHROPIC_API_KEY)
-npm run smoke -- --propose
-
-# Propose + immediately apply / open PR (needs both ANTHROPIC_API_KEY + GITHUB_TOKEN)
-npm run smoke -- --apply
+# Call Claude + open a real PR (needs ANTHROPIC_API_KEY + GITHUB_TOKEN)
+npm run smoke -- --live
 
 # Start the HTTP service
 npm start
@@ -36,8 +37,8 @@ npm start
 ## HTTP API
 
 ### `POST /fix`
-Calls Claude to diagnose the attack and generate a fix proposal.
-**Nothing is pushed to GitHub.** A human must review the proposal before applying.
+Calls Claude to diagnose the attack, generates a fix, and opens a GitHub PR.
+The PR is open for human review — it is **not** auto-merged.
 
 ```jsonc
 // request body
@@ -53,39 +54,10 @@ Calls Claude to diagnose the attack and generate a fix proposal.
       "messages": [ { "role": "user", "content": "..." } ]
     }
   ],
-  "model": "claude-sonnet-4-6",  // optional
-  "dryRun": false                 // optional — return prompt without calling Claude
-}
-```
-
-```jsonc
-// response
-{
-  "summary": "The agent trusted user-supplied credit_score ...",
-  "proposal": {
-    "branch_name": "fix/loan-approval-deny-approve-bypass",
-    "pr_title": "Fix: harden loan approval agent against mutable-field manipulation",
-    "pr_body": "## Root cause\n...",
-    "summary": "...",
-    "changes": [
-      { "path": "agents/loan_approval_agent/agent.py", "content": "<<full file>>" }
-    ]
-  },
-  "pending": false,
-  "tracing": false
-}
-```
-
-### `POST /fix/apply`
-After a human reviews and approves the proposal, call this endpoint to create
-the branch, commit the changed files, and open the GitHub pull request.
-
-```jsonc
-// request body
-{
-  "proposal": { ... },    // the proposal object from POST /fix
-  "repository": "...",    // optional, defaults to FIX_AGENT_REPO
-  "ref": "main"           // optional — branch to fork from
+  "repository": "...",        // optional, defaults to FIX_AGENT_REPO
+  "ref": "main",              // optional — branch to fork from
+  "model": "...",             // optional, defaults to FIX_AGENT_MODEL
+  "dryRun": false             // optional — return the prompt without calling Claude
 }
 ```
 
@@ -95,7 +67,7 @@ the branch, commit the changed files, and open the GitHub pull request.
   "prUrl": "https://github.com/bo-bi-beep/weavehacks4-repo/pull/55",
   "branchName": "fix/loan-approval-deny-approve-bypass-1749265432000",
   "prNumber": 55,
-  "summary": "...",
+  "summary": "The agent trusted user-supplied credit_score ...",
   "pending": false,
   "tracing": false
 }
@@ -108,28 +80,19 @@ the branch, commit the changed files, and open the GitHub pull request.
 ## curl example
 
 ```bash
-URL=https://fix-agent-production-4b79.up.railway.app
-
-# Step 1: get a proposal
-PROPOSAL=$(curl -s -X POST $URL/fix \
+curl -s -X POST https://fix-agent-production-4b79.up.railway.app/fix \
   -H "Content-Type: application/json" \
-  -d '{"traces": "bob ($25k) should be DENIED but was APPROVED via credit_score override."}')
-echo "$PROPOSAL" | jq .summary
-
-# ... human reviews the proposal ...
-
-# Step 2: apply after approval
-curl -s -X POST $URL/fix/apply \
-  -H "Content-Type: application/json" \
-  -d "{\"proposal\": $(echo $PROPOSAL | jq .proposal)}" | jq .prUrl
+  -d '{
+        "traces": "bob ($25k) should be DENIED but was APPROVED via credit_score override."
+      }' | jq .prUrl
 ```
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | **Required.** API key for calling Claude (used by `POST /fix`). |
-| `GITHUB_TOKEN` | — | **Required.** GitHub Personal Access Token with `repo` scope (used by `POST /fix/apply`). |
+| `ANTHROPIC_API_KEY` | — | **Required.** API key for calling Claude. |
+| `GITHUB_TOKEN` | — | **Required.** GitHub Personal Access Token with `repo` scope. |
 | `FIX_AGENT_REPO` | this repo's origin | GitHub repo to open PRs against. |
 | `FIX_AGENT_REF` | `main` | Branch the fix branches from. |
 | `FIX_AGENT_MODEL` | `claude-sonnet-4-6` | Claude model to use for the fix. |
@@ -164,10 +127,9 @@ whenever a loan decision diverges from the DB-baseline expected decision.
 fix_agent/
   lib/weave.ts  — local Weave init/tracing helpers
   github.ts     — GitHub REST API client (branch, commit, PR)
-  index.ts      — trace serializer, prompt builder, runFixAgent (Weave-traced),
-                  applyFixProposal
-  server.ts     — HTTP endpoints (POST /fix, POST /fix/apply, GET /health)
-  smoke.ts      — dry-run + --propose + --apply smoke test
+  index.ts      — trace serializer, prompt builder, runFixAgent (Weave-traced)
+  server.ts     — HTTP endpoints (POST /fix, GET /health)
+  smoke.ts      — dry-run + --live smoke test
   package.json  — self-contained Node.js project
   tsconfig.json — TypeScript config
   railway.toml  — Railway deployment config (startCommand: npm start)

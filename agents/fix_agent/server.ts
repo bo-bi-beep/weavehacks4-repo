@@ -6,31 +6,22 @@ import { pathToFileURL } from "node:url";
 import { getWeaveProjectName, initWeave, isWeaveEnabled } from "./lib/weave.js";
 import {
   DEFAULT_REPOSITORY,
-  applyFixProposal,
   runFixAgent,
-  type ApplyFixOptions,
   type FixAgentTraces,
-  type FixProposal,
-  type ProposeFixOptions,
+  type RunFixAgentOptions,
 } from "./index.js";
 
 /**
  * HTTP front door for the Fix Agent.
  *
  * Endpoints:
- *   POST /fix            { traces, model?, dryRun? }
- *                        -> { summary, proposal, pending, tracing }
- *                        Calls Claude to diagnose the attack and generate a fix
- *                        proposal (analysis + complete file changes). Nothing is
- *                        pushed to GitHub — a human must review the proposal first.
+ *   POST /fix      { traces, repository?, ref?, model?, dryRun? }
+ *                  Calls Claude to diagnose the attack, generates a fix, creates
+ *                  a branch, commits the changed files, and opens a GitHub PR.
+ *                  The PR is open for human review — it is NOT auto-merged.
+ *                  -> { prUrl, branchName, prNumber, summary, pending, tracing }
  *
- *   POST /fix/apply      { proposal, repository?, ref? }
- *                        -> { prUrl, branchName, prNumber, summary, pending, tracing }
- *                        After a human reviews and approves the proposal, call this
- *                        endpoint to create the branch, commit the files, and open
- *                        the pull request on GitHub.
- *
- *   GET  /health         -> { ok, configured, repository, tracing }
+ *   GET  /health   -> { ok, configured, repository, tracing }
  */
 export function createFixAgentServer() {
   return createServer((req, res) => {
@@ -45,7 +36,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const method = req.method ?? "GET";
   const url = new URL(req.url ?? "/", "http://localhost");
 
-  // GET /health
   if (method === "GET" && url.pathname === "/health") {
     return json(res, 200, {
       ok: true,
@@ -58,31 +48,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     });
   }
 
-  // POST /fix/apply — human-approved: create branch, commit, open PR
-  if (url.pathname === "/fix/apply") {
-    if (method !== "POST") return json(res, 405, { error: "Method not allowed" });
-
-    const body = (await readJson(req)) as Record<string, unknown>;
-    const proposal = body.proposal as FixProposal | undefined;
-
-    if (!isValidProposal(proposal)) {
-      return json(res, 400, {
-        error:
-          "Request body must include `proposal` (the object returned by POST /fix). " +
-          "Required fields: branch_name, pr_title, pr_body, changes[].",
-      });
-    }
-
-    const options: ApplyFixOptions = {
-      repository: asString(body.repository),
-      ref: asString(body.ref),
-    };
-
-    const result = await applyFixProposal(proposal, options);
-    return json(res, 200, result);
-  }
-
-  // POST /fix — Claude analysis + proposal (no GitHub changes)
   if (url.pathname === "/fix") {
     if (method !== "POST") return json(res, 405, { error: "Method not allowed" });
 
@@ -97,7 +62,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       });
     }
 
-    const options: ProposeFixOptions = {
+    const options: RunFixAgentOptions = {
+      repository: asString(body.repository),
+      ref: asString(body.ref),
       model: asString(body.model),
       dryRun: body.dryRun === true,
     };
@@ -113,18 +80,6 @@ function hasTraces(traces: unknown): traces is FixAgentTraces {
   if (typeof traces === "string") return traces.trim().length > 0;
   if (Array.isArray(traces)) return traces.length > 0;
   return typeof traces === "object" && traces !== null;
-}
-
-function isValidProposal(proposal: unknown): proposal is FixProposal {
-  if (typeof proposal !== "object" || proposal === null) return false;
-  const p = proposal as Record<string, unknown>;
-  return (
-    typeof p.branch_name === "string" &&
-    typeof p.pr_title === "string" &&
-    typeof p.pr_body === "string" &&
-    Array.isArray(p.changes) &&
-    p.changes.length > 0
-  );
 }
 
 function asString(value: unknown): string | undefined {
@@ -180,13 +135,11 @@ async function main(): Promise<void> {
     const anthropicOk = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
     const githubOk = Boolean(process.env.GITHUB_TOKEN?.trim());
     if (!anthropicOk) console.warn("[fix-agent] ANTHROPIC_API_KEY not set — POST /fix will fail.");
-    if (!githubOk)
-      console.warn("[fix-agent] GITHUB_TOKEN not set — POST /fix/apply will fail.");
+    if (!githubOk) console.warn("[fix-agent] GITHUB_TOKEN not set — POST /fix will fail.");
     console.log();
     console.log("Endpoints:");
-    console.log('  POST /fix          { "traces": ... }    Claude analysis + fix proposal (no GitHub)');
-    console.log('  POST /fix/apply    { "proposal": ... }  Human-approved: create branch + open PR');
-    console.log("  GET  /health                            liveness probe");
+    console.log('  POST /fix    { "traces": ... }   diagnose attack, generate fix, open GitHub PR');
+    console.log("  GET  /health                     liveness probe");
   });
 
   const shutdown = () => {
