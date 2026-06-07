@@ -1,10 +1,12 @@
 import "dotenv/config";
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { URL } from "node:url";
+import { resolve } from "node:path";
+import { pathToFileURL, URL } from "node:url";
 
 import { initWeave, weave } from "../../src/lib/weave.js";
 import { getAttackKbRecommendations, type AttackKbRecommendationOptions } from "./recommendations.js";
+import { getOrCreateCachedAttackKbRecommendationResponse } from "./server-recommendation-cache.js";
 import type { AgentUnderTestProfile } from "./types.js";
 
 export type AttackKbRecommendationRequestBody = {
@@ -49,6 +51,13 @@ const tracedRecommendationRequest = weave.op(
   { name: "attackKbRecommendationServerRequest" },
 );
 
+const tracedCachedRecommendationRequest = weave.op(
+  async function attackKbCachedRecommendationServerRequest(body: AttackKbRecommendationRequestBody) {
+    return getOrCreateCachedAttackKbRecommendationResponse(body, () => tracedRecommendationRequest(body));
+  },
+  { name: "attackKbCachedRecommendationServerRequest" },
+);
+
 export function createAttackKbServer() {
   return createServer(async (req, res) => {
     try {
@@ -67,6 +76,13 @@ export function createAttackKbServer() {
         return;
       }
 
+      if (method === "POST" && url.pathname === "/api/recommendations/cached") {
+        await initWeave();
+        const body = asRequestBody(await readJsonBody(req));
+        json(res, 200, await tracedCachedRecommendationRequest(body));
+        return;
+      }
+
       json(res, 404, { error: "Not found" });
     } catch (error) {
       json(res, 500, { error: error instanceof Error ? error.message : String(error) });
@@ -74,22 +90,33 @@ export function createAttackKbServer() {
   });
 }
 
-function parsePort(): number {
-  const value = process.env.ATTACK_KB_PORT ?? process.env.PORT ?? "3030";
+export function parseAttackKbServerPort(): number {
+  const isRailway = Boolean(
+    process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID,
+  );
+  const value = isRailway
+    ? process.env.PORT ?? process.env.ATTACK_KB_PORT ?? "3030"
+    : process.env.ATTACK_KB_PORT ?? process.env.PORT ?? "3030";
   const port = Number(value);
 
   if (!Number.isInteger(port) || port <= 0) {
-    throw new Error(`Invalid ATTACK_KB_PORT/PORT value: ${value}`);
+    throw new Error(`Invalid ${isRailway ? "PORT/ATTACK_KB_PORT" : "ATTACK_KB_PORT/PORT"} value: ${value}`);
   }
 
   return port;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+export function startAttackKbServer() {
   const server = createAttackKbServer();
-  const port = parsePort();
+  const port = parseAttackKbServerPort();
   server.listen(port, () => {
     console.log(`Attack KB server listening on http://localhost:${port}`);
-    console.log("POST /api/recommendations to retrieve Redis artifacts and run the Blaxel recommendationBuilder.");
+    console.log("POST /api/recommendations to retrieve Redis artifacts and run the Attack KB recommendationBuilder.");
+    console.log("POST /api/recommendations/cached to reuse a cached full recommendation response on repeat requests.");
   });
+  return server;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  startAttackKbServer();
 }

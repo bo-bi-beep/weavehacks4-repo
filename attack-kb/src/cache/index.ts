@@ -8,6 +8,7 @@ export const ATTACK_KB_LLM_CACHE_TASK_SCOPES = [
   "source-triage",
   "curation-review",
   "recommendation-explanation",
+  "recommendation-builder",
   "eval-scorer",
 ] as const;
 
@@ -28,6 +29,7 @@ export type AttackKbLlmCacheConfig = {
     cacheId?: string;
     apiKey?: string;
     similarityThreshold: number;
+    searchStrategies: Array<"exact" | "semantic">;
     useAttributes: boolean;
     fallbackToLocal: boolean;
     timeoutMs: number;
@@ -207,6 +209,17 @@ function parseRedisFallback(value: string | undefined): boolean {
   );
 }
 
+function parseLangCacheSearchStrategies(value: string | undefined): Array<"exact" | "semantic"> {
+  const rawStrategies = value?.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean) ?? ["exact"];
+  const strategies = rawStrategies.filter((entry): entry is "exact" | "semantic" => entry === "exact" || entry === "semantic");
+
+  if (strategies.length === 0) {
+    throw new Error(`Unsupported ATTACK_KB_LANGCACHE_SEARCH_STRATEGIES: ${value}. Use exact, semantic, or exact,semantic.`);
+  }
+
+  return [...new Set(strategies)];
+}
+
 function parseBooleanEnv(name: string, defaultValue: boolean): boolean {
   const normalized = env(name)?.toLowerCase();
 
@@ -384,6 +397,7 @@ export function getAttackKbLlmCacheConfig(): AttackKbLlmCacheConfig {
       cacheId: env("LANGCACHE_CACHE_ID"),
       apiKey: env("LANGCACHE_API_KEY"),
       similarityThreshold: Number(env("LANGCACHE_THRESHOLD") || "0.82"),
+      searchStrategies: parseLangCacheSearchStrategies(env("ATTACK_KB_LANGCACHE_SEARCH_STRATEGIES")),
       useAttributes: parseBooleanEnv("ATTACK_KB_LANGCACHE_USE_ATTRIBUTES", false),
       fallbackToLocal: parseRedisFallback(env("ATTACK_KB_LANGCACHE_FALLBACK") || env("ATTACK_KB_REDIS_CACHE_FALLBACK")),
       timeoutMs: parsePositiveIntegerEnv("ATTACK_KB_LANGCACHE_TIMEOUT_MS", 10_000),
@@ -606,18 +620,26 @@ function langCacheHeaders(config: AttackKbLlmCacheConfig): Record<string, string
 }
 
 function langCachePrompt(request: AttackKbLlmCacheRequest): string {
+  let raw: string;
   if (typeof request.input === "string") {
-    return request.input;
+    raw = request.input;
+  } else {
+    const input = request.input as { messages?: Array<{ role?: string; content?: unknown }> };
+    if (Array.isArray(input?.messages)) {
+      raw = input.messages
+        .map((message) => `${message.role ?? "message"}: ${typeof message.content === "string" ? message.content : canonicalJson(message.content)}`)
+        .join("\n");
+    } else {
+      raw = canonicalJson(request.input);
+    }
   }
 
-  const input = request.input as { messages?: Array<{ role?: string; content?: unknown }> };
-  if (Array.isArray(input?.messages)) {
-    return input.messages
-      .map((message) => `${message.role ?? "message"}: ${typeof message.content === "string" ? message.content : canonicalJson(message.content)}`)
-      .join("\n");
-  }
-
-  return canonicalJson(request.input);
+  const inputHash = sha256(canonicalJson(request.input)).slice(0, 20);
+  const prefix = `[task=${request.task} model=${request.model} inputHash=${inputHash}]\n`;
+  const maxPromptLength = 256;
+  const maxRawLength = Math.max(1, maxPromptLength - prefix.length - 1);
+  const compact = raw.length > maxRawLength ? `${raw.slice(0, maxRawLength - 1)}…` : raw;
+  return `${prefix}${compact}`.slice(0, maxPromptLength);
 }
 
 function langCacheAttributes(request: AttackKbLlmCacheRequest): Record<string, string> {
@@ -718,9 +740,11 @@ export function createLangCacheAttackKbLlmCache(
       try {
         const searchPayload: Record<string, unknown> = {
           prompt: langCachePrompt(request),
-          similarityThreshold: config.langCache.similarityThreshold,
-          searchStrategies: ["exact", "semantic"],
+          searchStrategies: config.langCache.searchStrategies,
         };
+        if (config.langCache.searchStrategies.includes("semantic")) {
+          searchPayload.similarityThreshold = config.langCache.similarityThreshold;
+        }
         if (config.langCache.useAttributes) {
           searchPayload.attributes = langCacheAttributes(request);
         }

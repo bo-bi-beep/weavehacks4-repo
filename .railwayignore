@@ -1,11 +1,13 @@
-node_modules
 .git
+Dockerfile
+Dockerfile.attack-kb
+node_modules
+dist
+.tmp
 .env
 .env.local
 .env.development
 .env.production
-dist
-.tmp
 attack-kb/.local
 coverage
 .DS_Store

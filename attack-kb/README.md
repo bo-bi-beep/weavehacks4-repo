@@ -21,12 +21,12 @@ Main agent starts attack
 
 Attack KB uses both keys, with separate responsibilities:
 
-- `OPENAI_API_KEY` — direct OpenAI API model calls for subagents
+- `OPENAI_API_KEY` — direct OpenAI API model calls for Attack KB role agents
 - `WANDB_API_KEY` — W&B Weave tracing/logging and project access
 
 Never commit real secrets. Put real values in local `.env` only.
 
-## Configurable subagent models
+## Configurable Attack KB role models
 
 Each Attack KB role can use a different model:
 
@@ -40,13 +40,14 @@ ATTACK_KB_RECOMMENDER_MODEL=gpt-5.5
 
 ## LLM cache / managed LangCache
 
-`attack-kb/src/cache/` provides local, Redis exact-key, and managed Redis LangCache providers for model paths. P0 can use exact keys derived from `model + task scope + input`, or `ATTACK_KB_LLM_CACHE=langcache` to call the managed Redis LangCache semantic cache service.
+`attack-kb/src/cache/` provides local, Redis exact-key, and managed Redis LangCache providers for model paths. P0 can use exact keys derived from `model + task scope + input`, or `ATTACK_KB_LLM_CACHE=langcache` to call the managed Redis LangCache cache service. Recommendation packets should use exact LangCache lookup by default.
 
 Supported task scopes:
 
 - `source-triage`
 - `curation-review`
 - `recommendation-explanation`
+- `recommendation-builder`
 - `eval-scorer`
 
 The cache is disabled by default. Enable local in-memory caching, Redis-backed exact-key caching with TTL, or managed LangCache semantic caching:
@@ -66,6 +67,7 @@ LANGCACHE_HOST=
 LANGCACHE_CACHE_ID=
 LANGCACHE_API_KEY=
 LANGCACHE_THRESHOLD=0.82
+ATTACK_KB_LANGCACHE_SEARCH_STRATEGIES=exact
 ATTACK_KB_LANGCACHE_FALLBACK=local
 ATTACK_KB_LANGCACHE_TIMEOUT_MS=10000
 ```
@@ -76,17 +78,17 @@ The optional `attack-kb:smoke` OpenAI path is wrapped with the `recommendation-e
 
 ## Recommendation server + skill
 
-The current recommendation handoff is documented in [`docs/attack-kb-recommendation-setup.md`](docs/attack-kb-recommendation-setup.md).
+The current recommendation handoff is documented in [`docs/attack-kb-recommendation-setup.md`](docs/attack-kb-recommendation-setup.md). Railway deployment for the Attack KB Node API is documented in [`docs/railway-deploy.md`](docs/railway-deploy.md).
 
 Flow:
 
 ```text
 main agent
 → use-attack-kb skill
-→ recommendation-fetcher subagent
+→ direct Attack KB server call
 → Attack KB server POST /api/recommendations
-→ Redis retrieval + payload_template companion retrieval
-→ Blaxel recommendationBuilder
+→ Redis retrieval over curated KB artifacts
+→ Attack KB recommendationBuilder
 → W&B/Weave-traced recommendation packet
 → main agent
 ```
@@ -102,7 +104,7 @@ The `use-attack-kb` skill is available at `attack-kb/skills/use-attack-kb/SKILL.
 
 ## Sandbox agents
 
-Live Attack KB agents mirror the repo's existing Blaxel sandbox pattern from `agents/sub_agents/` through `attack-kb/src/sandbox.ts`, while keeping Attack KB role files under `agents/attack_kb/`.
+Recommendation serving reads the Attack KB role files under `agents/attack_kb/` and calls the Recommendation Builder through the Attack KB runtime, without routing through the repo's general sub-agent service.
 
 Each role has its own folder with `README.md`, `instructions.md`, and `task.md`:
 
@@ -113,10 +115,10 @@ Each role has its own folder with `README.md`, `instructions.md`, and `task.md`:
 
 Runtime notes:
 
-- deterministic demos/evals do not launch Blaxel;
-- `npm run attack-kb:sandbox-smoke` prints the sandbox config and missing live-launch env vars without making model calls;
-- actual sandbox agent creation requires `OPENAI_API_KEY`, `BL_API_KEY`, and `BL_WORKSPACE`;
-- live Attack KB agents run in isolated Blaxel micro-VMs and must not directly contact the Agent Under Test or receive raw Redis admin credentials.
+- deterministic demos/evals do not call an LLM;
+- recommendation serving requires `OPENAI_API_KEY` and uses `agents/attack_kb/recommendation-builder/instructions.md`;
+- source-gathering/triage/curator sandbox flows remain separate from recommendation serving;
+- Attack KB agents must not directly contact the Agent Under Test or receive raw Redis admin credentials.
 
 ```bash
 npm run attack-kb:sandbox-smoke
@@ -202,13 +204,15 @@ ATTACK_KB_VECTOR_INDEX=attack-kb-vector
 ATTACK_KB_VECTOR_KEY_PREFIX=attack-kb:vector
 ATTACK_KB_VECTOR_INDEX_ALGORITHM=HNSW # or FLAT
 ATTACK_KB_VECTOR_DIMENSIONS=384
-ATTACK_KB_VECTOR_MATERIALIZE_ON_SEARCH=true
+ATTACK_KB_VECTOR_MATERIALIZE_ON_SEARCH=false
 ATTACK_KB_VECTOR_REDIS_FALLBACK=local
 ATTACK_KB_EMBEDDING_PROVIDER=deterministic
 ATTACK_KB_OPENAI_EMBEDDING_MODEL=text-embedding-3-small # seam only in P0; real calls deferred
 ```
 
 The RediSearch schema is `ON HASH` with `objectId`, `chunkId`, `objectType`, `domain`, `status`, and `sourceCategory` as `TAG` fields, `title`/`text` as `TEXT`, and `embedding VECTOR HNSW|FLAT TYPE FLOAT32 DIM <n> DISTANCE_METRIC COSINE`. Hybrid filters are applied in the Redis query, for example `(@domain:{credit_loan} @objectType:{business_attack_route})=>[KNN 20 @embedding $query_vector AS vector_distance]`; the returned candidates are then locally reranked with the same lexical boost used by deterministic fallback.
+
+Run `npm run attack-kb:vector-sync` after changing curated artifacts so the recommendation request path can query an existing Redis vector index instead of rebuilding it inline.
 
 Sample API use:
 
@@ -287,7 +291,7 @@ npm run typecheck
 npm run build
 ```
 
-`attack-kb:config` validates configuration without making a model call. `attack-kb:redis-health` prints sanitized Redis config/readiness and intended key/index/stream names; it stays report-only unless `ATTACK_KB_REDIS_HEALTH_CONNECT=1` is set. `attack-kb:sandbox-smoke` prints Attack KB's Blaxel/SubAgentService sandbox configuration without launching Blaxel or making a model call. `attack-kb:redis-smoke` is an optional networked Redis round trip that writes canonical seed objects and reads one back when a Redis URL is configured. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:source-pipeline` manually runs the live Blaxel source flow: Source Gathering -> Credibility Triage -> KB Curator -> trusted local Redis write. `attack-kb:clear-data` is a protected Redis data wipe for clean live runs. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:evals` runs deterministic recommendation, ingestion, provenance, and curation-quality evals; if `WANDB_API_KEY` is set, the cases are wrapped in Weave traces. `attack-kb:demo` starts the main-agent flow demo; `attack-kb:demo-smoke` validates the demo API without a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime unless the exact-key LLM cache hits.
+`attack-kb:config` validates configuration without making a model call. `attack-kb:redis-health` prints sanitized Redis config/readiness and intended key/index/stream names; it stays report-only unless `ATTACK_KB_REDIS_HEALTH_CONNECT=1` is set. `attack-kb:sandbox-smoke` prints legacy/non-recommendation sandbox configuration without launching Blaxel or making a model call. `attack-kb:redis-smoke` is an optional networked Redis round trip that writes canonical seed objects and reads one back when a Redis URL is configured. `attack-kb:probe` returns deterministic recommendations without calling an LLM. With no args it returns probing recommendations; with a rich profile it returns composed attack recommendations. `attack-kb:source-pipeline` manually runs the live source flow: Source Gathering -> Credibility Triage -> KB Curator -> trusted local Redis write. `attack-kb:clear-data` is a protected Redis data wipe for clean live runs. `attack-kb:ingest` is a no-OpenAI manual ingestion demo: it stores a sample source plus data item, creates curation candidates, fires the curation queue flow, and prints the resulting candidates. `attack-kb:curation-ui` starts a local human-in-the-loop curation UI; pass `-- --seed-demo` to create sample pending candidates when storage is empty. `attack-kb:curation-smoke` exercises the UI API without opening a browser. `attack-kb:evals` runs deterministic recommendation, ingestion, provenance, and curation-quality evals; if `WANDB_API_KEY` is set, the cases are wrapped in Weave traces. `attack-kb:demo` starts the main-agent flow demo; `attack-kb:demo-smoke` validates the demo API without a browser. `attack-kb:smoke` makes one traced OpenAI call through the recommendation-builder runtime unless the exact-key LLM cache hits.
 
 No-API rich-profile demo:
 
@@ -377,7 +381,7 @@ attack-kb/
   src/
     config.ts       env and per-role model config
     runtime.ts      traced OpenAI runtime for direct model calls
-    sandbox.ts      Blaxel/SubAgentService sandbox adapter for live Attack KB agents
+    sandbox.ts      legacy/non-recommendation sandbox adapter for Attack KB source-flow agents
     print-config.ts non-calling config check
     probe-demo.ts   no-API probing recommendation demo
     ingest-demo.ts  no-OpenAI source/data ingestion and curation-candidate demo
@@ -392,7 +396,7 @@ attack-kb/
     retrieval/      deterministic + Redis vector/hybrid semantic context retrieval
     redis/          Redis client/env helper, Query Engine index/search support, streams/events, and health/config report command
     iris/           managed Iris service health and LangCache smoke commands
-    source-pipeline/ manual Blaxel source-gathering -> triage -> curator pipeline
+    source-pipeline/ manual source-gathering -> triage -> curator pipeline
     maintenance/    protected Redis data-clear utilities
     memory/         run/outcome Agent Memory adapter with local fallback and Redis KV backend
     storage/        storage interface, local memory/json fallback, Redis-backed adapter

@@ -1,7 +1,4 @@
-# Attack KB HTTP API service for Railway/demo deployment.
-#
-# Redis Cloud backs storage/retrieval/cache/memory/context services. This image
-# only hosts the Node HTTP wrapper for /api/health and /api/recommendations.
+# Attack KB HTTP API for Railway.
 FROM node:22-slim
 
 WORKDIR /app
