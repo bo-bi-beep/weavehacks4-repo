@@ -102,7 +102,16 @@ def send_message(session_id: str, req: MessageRequest):
     """Send a user message and get the agent's reply."""
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found.")
-    reply = chat(session_id, req.message)
+
+    s = sessions[session_id]
+    # Count prior user turns for a monotonically increasing turn_id.
+    turn_num = sum(1 for m in s["messages"][1:] if m["role"] == "user")
+
+    # thread_id groups all turns of this session in Weave;
+    # turn_id lets you order or filter individual turns within a thread.
+    with weave.attributes({"thread_id": session_id, "turn_id": str(turn_num)}):
+        reply = chat(session_id, req.message)
+
     return {"reply": reply}
 
 
