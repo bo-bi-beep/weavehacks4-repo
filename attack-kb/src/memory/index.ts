@@ -242,10 +242,14 @@ function parseRedisUrl(redisUrl: string, timeoutMs: number): RedisConnectionConf
   }
 
   const databasePath = parsed.pathname.replace(/^\//u, "");
-  const database = databasePath ? Number(databasePath) : undefined;
+  let database: number | undefined;
 
-  if (databasePath && (!Number.isInteger(database) || database < 0)) {
-    throw new Error("Attack KB memory Redis URL database path must be a non-negative integer.");
+  if (databasePath) {
+    const parsedDatabase = Number(databasePath);
+    if (!Number.isInteger(parsedDatabase) || parsedDatabase < 0) {
+      throw new Error("Attack KB memory Redis URL database path must be a non-negative integer.");
+    }
+    database = parsedDatabase;
   }
 
   return {

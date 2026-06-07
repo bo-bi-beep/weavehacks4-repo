@@ -225,7 +225,7 @@ async function jsonSetObject(
   key: string,
   object: AttackKbCanonicalObject,
 ): Promise<void> {
-  const result = await client.sendCommand(["JSON.SET", key, "$", JSON.stringify(object)]);
+  const result = await client.sendCommand<string>(["JSON.SET", key, "$", JSON.stringify(object)]);
   if (result !== "OK") {
     throw new Error(`Unexpected JSON.SET reply for ${key}: ${String(result)}`);
   }

@@ -1,6 +1,18 @@
 import { createClient } from "redis";
 
-export type AttackKbRedisClient = ReturnType<typeof createClient>;
+export type AttackKbRedisClient = {
+  readonly isOpen: boolean;
+  connect(): Promise<AttackKbRedisClient>;
+  close(): Promise<void>;
+  destroy(): void;
+  on(event: "error", listener: (error: Error) => void): AttackKbRedisClient;
+  sendCommand<T = unknown>(args: string[]): Promise<T>;
+  del(key: string): Promise<number>;
+  set(key: string, value: string): Promise<unknown>;
+  get(key: string): Promise<string | null>;
+  sAdd(key: string, member: string): Promise<number>;
+  sMembers(key: string): Promise<string[]>;
+};
 
 export type AttackKbRedisUrlSource = "ATTACK_KB_REDIS_IRIS_URL" | "REDIS_URL";
 
@@ -55,5 +67,5 @@ export function createAttackKbRedisClient(
 
   const client = createClient({ url: config.url });
   client.on("error", options.onError ?? (() => undefined));
-  return client;
+  return client as unknown as AttackKbRedisClient;
 }
