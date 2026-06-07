@@ -9,6 +9,7 @@ Starter repo for WeaveHacks 4, with W&B Weave wired in early.
 - Python `SubAgentManager` for parallel FinTech loan-agent red teaming in `agents/sub_agent_manager.py`
 - Adversarial OpenAI Sandbox Agent on a Blaxel sandbox in `agents/main_agent/` (`npm run main:agent` for the one-shot CLI, `npm run main:serve` for the HTTP service) that attacks the Loan Approval Agent for vulnerabilities, loads the `loan-approval-agent` skill by default (`MAIN_AGENT_SKILLS` to override), and can orchestrate sub-agents as tools
 - Sub-agents service in `agents/sub_agents/` — used both as an HTTP/SSE API (`npm run sub:agents`) and in-process as the main agent's sub-agent tools
+- Fix Agent in `agents/fix_agent/` — closes the red-team loop: takes the traces of a successful attack on the Loan Approval Agent and dispatches a **Cursor Cloud Agent** that opens a PR fixing `agents/loan_approval_agent/`, returning a fix summary + PR URL (`npm run fix:serve` for the HTTP service, `npm run fix:smoke` for a dry run). Weave-traced.
 - Attack KB subsystem under `attack-kb/`, with Redis-backed retrieval, Blaxel recommendationBuilder, and W&B Weave tracing
 - Hackathon logistics in `docs/weavehacks-setup.md`
 - Submission checklist in `docs/submission-checklist.md`
@@ -43,6 +44,7 @@ Fill in:
 - `WANDB_PROJECT`
 - `OPENAI_API_KEY` — used for direct OpenAI model calls
 - `BL_API_KEY` / `BL_WORKSPACE` — Blaxel sandbox, needed for `npm run main:agent`, `npm run sub:agents`, and live Attack KB sandbox agents
+- `CURSOR_API_KEY` — Cursor Background Agents API key, needed for the Fix Agent (`npm run fix:serve`); optional `FIX_AGENT_REPO`, `FIX_AGENT_REF`, `FIX_AGENT_MODEL`, `FIX_AGENT_PORT`, `FIX_AGENT_WAIT_MS`
 - optional: `OPENAI_MODEL`, `BLAXEL_SANDBOX_IMAGE`, `BLAXEL_SANDBOX_MEMORY`, `BLAXEL_SANDBOX_REGION`
 - optional Attack KB Redis report/storage vars: `ATTACK_KB_STORAGE_ADAPTER`, `ATTACK_KB_REDIS_IRIS_URL`, `ATTACK_KB_REDIS_IRIS_INDEX`, `ATTACK_KB_REDIS_IRIS_NAMESPACE`, `ATTACK_KB_REDIS_KEY_PREFIX`, `ATTACK_KB_REDIS_HEALTH_CONNECT`
 

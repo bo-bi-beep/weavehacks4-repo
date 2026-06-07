@@ -8,6 +8,8 @@
     "main:agent": "tsx agents/main_agent/index.ts",
     "main:serve": "tsx agents/main_agent/server.ts",
     "sub:agents": "tsx agents/sub_agents/server.ts",
+    "fix:serve": "tsx agents/fix_agent/server.ts",
+    "fix:smoke": "tsx agents/fix_agent/smoke.ts",
     "weave:smoke": "tsx src/smoke.ts",
     "attack-kb:config": "tsx attack-kb/src/print-config.ts",
     "attack-kb:redis-health": "tsx attack-kb/src/redis/health.ts",

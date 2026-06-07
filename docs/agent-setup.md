@@ -240,6 +240,33 @@ That skill spawns a recommendation-fetcher subagent that calls
 `POST /api/recommendations` and returns the W&B/Weave-traced recommendation packet.
 See `attack-kb/docs/attack-kb-recommendation-setup.md` for the full setup and smoke test.
 
+## Fix Agent (Cursor Cloud Agents)
+The repo ships a remediation service in `agents/fix_agent/` that closes the
+red-team loop. Given the **traces of a successful attack** on the Loan Approval
+Agent (e.g. a prompt injection that flipped a DENY into an APPROVE), it
+dispatches a **Cursor Background / Cloud Agent** that root-causes the
+vulnerability and opens a **pull request** hardening `agents/loan_approval_agent/`,
+then returns a fix summary + the PR URL.
+
+```bash
+npm run fix:smoke            # dry run — print the remediation prompt (no key)
+npm run fix:smoke -- --live  # launch a real Cloud Agent (needs CURSOR_API_KEY)
+npm run fix:serve            # HTTP service, FIX_AGENT_PORT then PORT, default 3040
+```
+
+- `POST /fix` — body `{ traces, wait?, timeoutMs?, repository?, ref?, model?, branchName?, dryRun? }`,
+  returns `{ summary, prUrl, agentId, agentUrl, branchName, status, pending, tracing }`
+- `GET /agents/:id` — poll a launched agent for its PR url
+- `GET /health` — liveness + whether `CURSOR_API_KEY` is configured
+
+It needs `CURSOR_API_KEY` (Cursor dashboard → Integrations → Background Agents
+API) plus the usual `WANDB_*` vars for Weave tracing; `FIX_AGENT_REPO`,
+`FIX_AGENT_REF`, `FIX_AGENT_MODEL`, `FIX_AGENT_PORT`, and `FIX_AGENT_WAIT_MS` are
+optional overrides. The Cloud Agent runs remotely on Cursor's infrastructure, so
+this service only needs outbound network. The launch + wait is Weave-traced as
+`fixLoanApprovalAgent` (the prompt and result are logged; the API key is not).
+See `agents/fix_agent/README.md` for the full API and curl examples.
+
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`, and Attack KB model calls expect your local `OPENAI_API_KEY`.
 - If an agent does not pick up a new config file, restart it from the repo root.
