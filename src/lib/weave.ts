@@ -19,6 +19,15 @@ export function getOpenAIModel(): string {
   return process.env.OPENAI_MODEL?.trim() || "gpt-5.4-mini";
 }
 
+/**
+ * Model for the orchestrating Main Agent. It runs on a stronger model than the
+ * sub-agents (which use {@link getOpenAIModel}), so it has its own knob:
+ * `MAIN_AGENT_MODEL`, defaulting to OpenAI GPT-5.5.
+ */
+export function getMainAgentModel(): string {
+  return process.env.MAIN_AGENT_MODEL?.trim() || "gpt-5.5";
+}
+
 let initialized = false;
 let weaveEnabled = false;
 

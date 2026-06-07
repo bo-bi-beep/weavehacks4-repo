@@ -142,7 +142,8 @@ defaults to `3000`, so the two don't collide).
 ## Env vars
 
 - `OPENAI_API_KEY` — required (model calls)
-- `OPENAI_MODEL` — optional, defaults to `gpt-5.4-mini`
+- `MAIN_AGENT_MODEL` — optional, the Main Agent's model; defaults to `gpt-5.5` (OpenAI GPT-5.5)
+- `OPENAI_MODEL` — optional, the sub-agents' model; defaults to `gpt-5.4-mini`
 - `MAIN_AGENT_SKILLS` — optional, comma-separated skill names to load; defaults to `loan-approval-agent` (`none`/empty loads no skills)
 - `BL_API_KEY` — required (Blaxel sandbox auth)
 - `BL_WORKSPACE` — required (Blaxel workspace)

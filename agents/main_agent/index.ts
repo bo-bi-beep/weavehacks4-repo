@@ -8,7 +8,7 @@ import { Manifest, SandboxAgent, file, shell } from "@openai/agents/sandbox";
 
 import { createBlaxelSandboxClient } from "../../src/lib/blaxel.js";
 import {
-  getOpenAIModel,
+  getMainAgentModel,
   getWeaveProjectName,
   initWeave,
   requireEnv,
@@ -158,7 +158,7 @@ const instructions =
 export function createMainAgent(subAgents: SubAgentService): SandboxAgent {
   return new SandboxAgent({
     name: "Main Agent",
-    model: getOpenAIModel(),
+    model: getMainAgentModel(),
     instructions,
     defaultManifest: manifest,
     capabilities: [shell()],
