@@ -68,6 +68,7 @@ if (!isLangCacheConfigured(config)) {
             cacheId: "set",
             apiKey: "set",
             threshold: config.langCache.similarityThreshold,
+            searchStrategies: config.langCache.searchStrategies,
           },
           flushedBeforeSmoke: shouldFlush,
           firstCall: {

@@ -32,6 +32,7 @@ const report = {
       LANGCACHE_CACHE_ID: set("LANGCACHE_CACHE_ID"),
       LANGCACHE_API_KEY: set("LANGCACHE_API_KEY"),
       LANGCACHE_THRESHOLD: env("LANGCACHE_THRESHOLD") || String(cacheConfig.langCache.similarityThreshold),
+      ATTACK_KB_LANGCACHE_SEARCH_STRATEGIES: env("ATTACK_KB_LANGCACHE_SEARCH_STRATEGIES") || cacheConfig.langCache.searchStrategies.join(","),
     },
     cli: "npm run attack-kb:langcache-smoke -- --flush",
   },
