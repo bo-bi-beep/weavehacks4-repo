@@ -15,6 +15,7 @@ import {
   weave,
 } from "../../src/lib/weave.js";
 import { SubAgentService } from "../sub_agents/service.js";
+import { withAttackKbRecommendations } from "./attack_kb.js";
 import { createSubAgentTools } from "./sub_agent_tools.js";
 
 // Each run gets its own registry of sandboxed sub-agents (see `createMainAgent`
@@ -39,6 +40,12 @@ const SKILL_SEARCH_DIRS = [".claude/skills", ".agents/skills"];
  * service loads skills on demand, but the main agent loads a fixed set at
  * startup. Override with `MAIN_AGENT_SKILLS` (comma-separated; `none` or empty
  * to disable).
+ *
+ * `use-attack-kb` is intentionally NOT loaded. Instead of reading that skill and
+ * spawning a recommendation-fetcher sub-agent, the main agent now calls the
+ * Attack KB server's `POST /api/recommendations` endpoint directly at the start
+ * of each run and seeds the prompt with the recommended attack paths — see
+ * {@link withAttackKbRecommendations}.
  */
 const DEFAULT_SKILLS = ["loan-approval-agent"];
 
@@ -234,8 +241,11 @@ const runMainAgentTraced = weave.op(async function runMainAgent(
   // each) never share a sub-agent registry or tear down each other's sandboxes.
   const subAgents = new SubAgentService();
   const agent = createMainAgent(subAgents);
+  // Seed the run with the recommended attack paths, fetched directly from the
+  // Attack KB endpoint (replaces the former use-attack-kb skill handoff).
+  const seededPrompt = await withAttackKbRecommendations(prompt);
   try {
-    const stream = await run(agent, prompt, {
+    const stream = await run(agent, seededPrompt, {
       sandbox: { client: createBlaxelSandboxClient() },
       stream: true,
       signal,

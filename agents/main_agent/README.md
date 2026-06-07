@@ -29,9 +29,13 @@ resolved from `.claude/skills/<name>/` or `.agents/skills/<name>/`, mounted at
 `skills/<name>/SKILL.md` in the sandbox, and referenced from the agent's
 instructions so the model reads it before acting.
 
-By default it loads the **`loan-approval-agent`** skill (how to drive the Loan
-Approval Agent HTTP API). Override the set with `MAIN_AGENT_SKILLS` — a
-comma-separated list of skill names, or `none`/empty to load nothing:
+By default it loads one skill: **`loan-approval-agent`** (how to drive the Loan
+Approval Agent HTTP API). It no longer loads **`use-attack-kb`** — instead of
+reading that skill and spawning a recommendation-fetcher sub-agent, the main
+agent now calls the Attack KB server's `POST /api/recommendations` endpoint
+directly at the start of each run (see [Attack KB recommendations](#attack-kb-recommendations)
+below). Override the loaded skills with `MAIN_AGENT_SKILLS` — a comma-separated
+list of skill names, or `none`/empty to load nothing:
 
 ```bash
 # load two skills
@@ -47,6 +51,30 @@ The loaded names are exported as `loadedSkills` and printed on startup.
 The `harness` (model calls, agent logic) stays in this process; the `compute`
 (files, shell commands) runs inside a Blaxel micro-VM. The runner creates the
 sandbox session from `defaultManifest` and tears it down when the run finishes.
+
+## Attack KB recommendations
+
+At the start of every run (`runMainAgent`), the main agent fetches its
+recommended attack paths **directly** from the Attack KB server's
+`POST /api/recommendations` endpoint and seeds the run prompt with them. This
+replaces the former `use-attack-kb` skill, which read a `SKILL.md` and spawned a
+recommendation-fetcher sub-agent to make the same call.
+
+- The request body is the latest observed Loan Approval Agent profile (its
+  `credit_loan` tech stack, tools, policies, and highest-leverage decision
+  factors) plus the recommendation options.
+- The server URL comes from `ATTACK_KB_SERVER_URL`, defaulting to
+  `http://127.0.0.1:3030` (start it with `npm run attack-kb:server`).
+- The packet is distilled to a concise briefing (per recommendation: id,
+  `attackerGoal`, `targetOutcome`, `attackerSteps`, `breachSuccessCriteria`,
+  `payloadTemplateRefs`, the first sample-scenario turns, and `safetyBoundary`)
+  and appended to the prompt; the agent executes those synthetic, authorized
+  attack paths against the Loan Approval Agent.
+- The fetch is its own Weave span (`fetchAttackKbRecommendations`) nested under
+  the run, so the recommended paths are visible in the trace.
+- It is **best-effort**: if the endpoint is unreachable the run proceeds on the
+  base prompt (a warning is logged) rather than crashing, and no recommendations
+  are invented.
 
 ## Orchestrating sub-agents
 
@@ -145,6 +173,7 @@ defaults to `3000`, so the two don't collide).
 - `MAIN_AGENT_MODEL` — optional, the Main Agent's model; defaults to `gpt-5.5` (OpenAI GPT-5.5)
 - `OPENAI_MODEL` — optional, the sub-agents' model; defaults to `gpt-5.4-mini`
 - `MAIN_AGENT_SKILLS` — optional, comma-separated skill names to load; defaults to `loan-approval-agent` (`none`/empty loads no skills)
+- `ATTACK_KB_SERVER_URL` — optional, Attack KB recommendation server base URL; defaults to `http://127.0.0.1:3030` (used for the startup `POST /api/recommendations` call)
 - `BL_API_KEY` — required (Blaxel sandbox auth)
 - `BL_WORKSPACE` — required (Blaxel workspace)
 - `BLAXEL_SANDBOX_IMAGE` — optional, defaults to `blaxel/base-image`

@@ -24,6 +24,7 @@ export WANDB_PROJECT=weavehacks4-attack-kb
 export OPENAI_API_KEY=your-openai-api-key
 export MAIN_AGENT_MODEL=gpt-5.5   # Main Agent (orchestrator) model
 export OPENAI_MODEL=gpt-5.4-mini  # sub-agents' model
+export COPILOT_MODEL=openai/gpt-4o-mini
 
 # Blaxel sandbox (compute backend for agents/main_agent, agents/sub_agents,
 # and live Attack KB sandbox agents)
@@ -234,11 +235,54 @@ through `attack-kb/src/sandbox.ts`. Deterministic Attack KB demos/evals do not
 launch Blaxel; use `npm run attack-kb:sandbox-smoke` to inspect the sandbox config
 and missing live-launch env vars.
 
-For the current recommendation handoff, start the Attack KB server with
-`npm run attack-kb:server` and have the main agent use `.agents/skills/use-attack-kb/SKILL.md`.
-That skill spawns a recommendation-fetcher subagent that calls
-`POST /api/recommendations` and returns the W&B/Weave-traced recommendation packet.
-See `attack-kb/docs/attack-kb-recommendation-setup.md` for the full setup and smoke test.
+For the recommendation handoff, start the Attack KB server with
+`npm run attack-kb:server` (or point `ATTACK_KB_SERVER_URL` at a running one). At
+the start of each run the main agent calls `POST /api/recommendations` **directly**
+and seeds its prompt with the W&B/Weave-traced recommended attack paths — it no
+longer loads the `use-attack-kb` skill or spawns a recommendation-fetcher subagent
+for this. See `attack-kb/docs/attack-kb-recommendation-setup.md` for the full setup
+and smoke test.
+
+## Fix Agent (Cursor Cloud Agents)
+The repo ships a remediation service in `agents/fix_agent/` that closes the
+red-team loop. Given the **traces of a successful attack** on the Loan Approval
+Agent (e.g. a prompt injection that flipped a DENY into an APPROVE), it
+dispatches a **Cursor Background / Cloud Agent** that root-causes the
+vulnerability and opens a **pull request** hardening `agents/loan_approval_agent/`,
+then returns a fix summary + the PR URL.
+
+```bash
+npm run fix:smoke            # dry run — print the remediation prompt (no key)
+npm run fix:smoke -- --live  # launch a real Cloud Agent (needs CURSOR_API_KEY)
+npm run fix:serve            # HTTP service, FIX_AGENT_PORT then PORT, default 3040
+```
+
+- `POST /fix` — body `{ traces, wait?, timeoutMs?, repository?, ref?, model?, branchName?, dryRun? }`,
+  returns `{ summary, prUrl, agentId, agentUrl, branchName, status, pending, tracing }`
+- `GET /agents/:id` — poll a launched agent for its PR url
+- `GET /health` — liveness + whether `CURSOR_API_KEY` is configured
+
+It needs `CURSOR_API_KEY` (Cursor dashboard → Integrations → Background Agents
+API) plus the usual `WANDB_*` vars for Weave tracing; `FIX_AGENT_REPO`,
+`FIX_AGENT_REF`, `FIX_AGENT_MODEL`, `FIX_AGENT_PORT`, and `FIX_AGENT_WAIT_MS` are
+optional overrides. The Cloud Agent runs remotely on Cursor's infrastructure, so
+this service only needs outbound network. The launch + wait is Weave-traced as
+`fixLoanApprovalAgent` (the prompt and result are logged; the API key is not).
+See `agents/fix_agent/README.md` for the full API and curl examples.
+
+## CopilotKit demo dashboard
+The hackathon demo UI lives in `apps/demo-dashboard/`. It is replay-first: the
+dashboard reads curated Weave-backed attack/regression records from
+`apps/demo-dashboard/lib/replay.ts`, while the CopilotKit sidebar acts as a
+presenter that can select rounds, explain score evidence, and point to W&B
+Weave trace links.
+
+```bash
+npm run dashboard:dev
+```
+
+Use `COPILOT_MODEL` to choose the sidebar model independently from the runtime
+agent model. The default is `openai/gpt-4o-mini`.
 
 ## Notes
 - No secrets are committed; all MCP files expect your local `WANDB_API_KEY`, and Attack KB model calls expect your local `OPENAI_API_KEY`.
