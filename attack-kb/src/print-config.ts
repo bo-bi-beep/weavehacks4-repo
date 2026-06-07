@@ -58,6 +58,14 @@ console.log(
           fallbackToLocal: cacheConfig.redis.fallbackToLocal,
           timeoutMs: cacheConfig.redis.timeoutMs,
         },
+        langCache: {
+          host: cacheConfig.langCache.host ? "set" : "missing",
+          cacheId: cacheConfig.langCache.cacheId ? "set" : "missing",
+          apiKey: cacheConfig.langCache.apiKey ? "set" : "missing",
+          similarityThreshold: cacheConfig.langCache.similarityThreshold,
+          fallbackToLocal: cacheConfig.langCache.fallbackToLocal,
+          timeoutMs: cacheConfig.langCache.timeoutMs,
+        },
       },
       retrieval: {
         backend: retrievalConfig.backend,

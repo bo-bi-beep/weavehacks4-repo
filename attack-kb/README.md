@@ -39,9 +39,9 @@ ATTACK_KB_CURATOR_MODEL=gpt-5.5
 ATTACK_KB_RECOMMENDER_MODEL=gpt-5.5
 ```
 
-## LLM semantic-cache seam
+## LLM cache / managed LangCache
 
-`attack-kb/src/cache/` provides a LangCache-ready seam for model paths. P0 uses exact keys derived from `model + task scope + input` and stores each task scope under its own key path so cache entries cannot cross-contaminate.
+`attack-kb/src/cache/` provides local, Redis exact-key, and managed Redis LangCache providers for model paths. P0 can use exact keys derived from `model + task scope + input`, or `ATTACK_KB_LLM_CACHE=langcache` to call the managed Redis LangCache semantic cache service.
 
 Supported task scopes:
 
@@ -50,20 +50,30 @@ Supported task scopes:
 - `recommendation-explanation`
 - `eval-scorer`
 
-The cache is disabled by default. Enable local in-memory caching or Redis-backed exact-key caching with TTL:
+The cache is disabled by default. Enable local in-memory caching, Redis-backed exact-key caching with TTL, or managed LangCache semantic caching:
 
 ```bash
-ATTACK_KB_LLM_CACHE=disabled # disabled | local | redis
+ATTACK_KB_LLM_CACHE=disabled # disabled | local | redis | langcache
 ATTACK_KB_LLM_CACHE_TTL_SECONDS=86400
-ATTACK_KB_REDIS_CACHE_URL=redis://localhost:6379
+
+# Redis exact-key cache, optional when ATTACK_KB_LLM_CACHE=redis.
+ATTACK_KB_REDIS_CACHE_URL= # optional; defaults to REDIS_URL
 ATTACK_KB_REDIS_CACHE_KEY_PREFIX=attack-kb:llm-cache
 ATTACK_KB_REDIS_CACHE_FALLBACK=local # or disabled for strict Redis
 ATTACK_KB_REDIS_CACHE_TIMEOUT_MS=2000
+
+# Managed Redis LangCache service, required when ATTACK_KB_LLM_CACHE=langcache.
+LANGCACHE_HOST=
+LANGCACHE_CACHE_ID=
+LANGCACHE_API_KEY=
+LANGCACHE_THRESHOLD=0.82
+ATTACK_KB_LANGCACHE_FALLBACK=local
+ATTACK_KB_LANGCACHE_TIMEOUT_MS=10000
 ```
 
-Redis mode writes JSON cache entries with Redis `EX` TTL. If Redis is unavailable and fallback is `local`, the runtime fails open to process-local memory and emits one warning. `ATTACK_KB_LLM_CACHE=disabled` is a no-op cache that always calls the loader.
+Redis mode writes JSON cache entries with Redis `EX` TTL. Managed LangCache mode uses the Redis LangCache REST API (`/entries/search`, `/entries`) and keeps task/model attributes isolated. If the selected provider is unavailable and fallback is `local`, the runtime fails open to process-local memory and emits one warning. `ATTACK_KB_LLM_CACHE=disabled` is a no-op cache that always calls the loader.
 
-The optional `attack-kb:smoke` OpenAI path is wrapped with the `recommendation-explanation` scope. Deterministic recommendation demos and evals do not call OpenAI and are not changed by this cache seam. Deferred LangCache-specific work: semantic similarity lookup, embedding/index management, invalidation policies, and hit-quality metrics.
+The optional `attack-kb:smoke` OpenAI path is wrapped with the `recommendation-explanation` scope. Deterministic recommendation demos and evals do not call OpenAI. Use `npm run attack-kb:langcache-smoke -- --flush` to validate the managed LangCache service without making an LLM call.
 
 ## Sandbox agents
 
@@ -220,10 +230,11 @@ If `ATTACK_KB_MEMORY_REDIS_URL` is unset, auto mode reuses `REDIS_URL`/`ATTACK_K
 
 This is a Redis key-value Agent Memory seam. If a sponsor-specific Iris/Agent Memory SDK exposes a different API, replace the implementation behind `AttackKbMemoryAdapter` without changing the recommendation/demo call sites.
 
-Redis observability/security guidance lives in [`docs/redis-observability-security.md`](docs/redis-observability-security.md). The safe report command prints sanitized config and intended Redis names without contacting Redis unless `ATTACK_KB_REDIS_HEALTH_CONNECT=1` is set:
+Redis observability/security guidance lives in [`docs/redis-observability-security.md`](docs/redis-observability-security.md). Managed Iris service setup guidance lives in [`docs/redis-iris-services-setup.md`](docs/redis-iris-services-setup.md). The safe report command prints sanitized config and intended Redis names without contacting Redis unless `ATTACK_KB_REDIS_HEALTH_CONNECT=1` is set:
 
 ```bash
 npm run attack-kb:redis-health
+npm run attack-kb:iris-health
 ATTACK_KB_REDIS_HEALTH_CONNECT=1 npm run attack-kb:redis-health
 ```
 
@@ -333,9 +344,10 @@ attack-kb/
     credit-loan/    credit-loan probe, scenario, and route seeds
     curation/       queue primitive plus local HITL curation UI, API, auto-review, and smoke test
     ingestion/      source/data ingestion entrypoints, samples, and Weave tracing wrapper
-    cache/          exact-key LLM cache seam with no-op, local, and Redis providers
+    cache/          LLM cache with no-op, local, Redis exact-key, and managed LangCache providers
     retrieval/      deterministic + Redis vector/hybrid semantic context retrieval
     redis/          Redis client/env helper, Query Engine index/search support, streams/events, and health/config report command
+    iris/           managed Iris service health and LangCache smoke commands
     memory/         run/outcome Agent Memory adapter with local fallback and Redis KV backend
     storage/        storage interface, local memory/json fallback, Redis-backed adapter
 ```
@@ -347,4 +359,4 @@ Current deterministic KB entities include:
 - `BusinessAttackRoute` — defensive business-route checks that compose financial factors with system-level patterns.
 - `AttackRecommendation` — output DTO. Probing recommendations reference `ReconProbe`; rich-profile attack recommendations include `composition`, `businessAttackRouteRefs`, `domainScenarioRefs`, and `systemPatternRefs`.
 
-Future follow-up work can connect the retrieval API to Redis Context Retriever/Iris services, add production embedding refresh/invalidation, and connect the main attack agent to this subsystem over its final API boundary.
+Current P0 main-agent recommendations use Redis-backed Iris/vector context retrieval. Follow-up work can wire the managed Redis Context Retriever and Agent Memory service APIs once their service credentials are available, add production embedding refresh/invalidation, and connect the main attack agent to this subsystem over its final API boundary.

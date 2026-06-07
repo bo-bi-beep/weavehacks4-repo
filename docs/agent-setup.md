@@ -37,9 +37,12 @@ export ATTACK_KB_CREDIBILITY_TRIAGE_MODEL=gpt-5.5
 export ATTACK_KB_CURATOR_MODEL=gpt-5.5
 export ATTACK_KB_RECOMMENDER_MODEL=gpt-5.5
 
-# Optional Attack KB LLM cache. Keep disabled unless you want local/Redis exact-key caching.
-export ATTACK_KB_LLM_CACHE=disabled # disabled | local | redis
+# Optional Attack KB LLM cache. Use langcache when the managed Redis LangCache service is configured.
+export ATTACK_KB_LLM_CACHE=disabled # disabled | local | redis | langcache
 export ATTACK_KB_LLM_CACHE_TTL_SECONDS=86400
+export LANGCACHE_HOST=
+export LANGCACHE_CACHE_ID=
+export LANGCACHE_API_KEY=
 
 # P0 main-agent Iris/vector-hybrid retrieval. Keep local for no-network deterministic demos;
 # use redis/auto when Redis Cloud/Stack with RediSearch is configured.
@@ -69,7 +72,7 @@ Check the Attack KB sandbox configuration without launching Blaxel or making a m
 npm run attack-kb:sandbox-smoke
 ```
 
-Run one optional traced smoke call, which consumes OpenAI API usage and logs to Weave. If `ATTACK_KB_LLM_CACHE=local` or `redis`, the recommendation-builder smoke path is wrapped by the exact-key semantic-cache seam using the `recommendation-explanation` task scope:
+Run one optional traced smoke call, which consumes OpenAI API usage and logs to Weave. If `ATTACK_KB_LLM_CACHE=local`, `redis`, or `langcache`, the recommendation-builder smoke path is wrapped by the cache seam using the `recommendation-explanation` task scope. Validate managed LangCache first with `npm run attack-kb:langcache-smoke -- --flush`:
 
 ```bash
 npm run attack-kb:smoke -- "suggest one credit-loan probing recommendation"

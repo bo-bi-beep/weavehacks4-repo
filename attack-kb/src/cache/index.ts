@@ -12,7 +12,7 @@ export const ATTACK_KB_LLM_CACHE_TASK_SCOPES = [
 ] as const;
 
 export type AttackKbLlmCacheTaskScope = (typeof ATTACK_KB_LLM_CACHE_TASK_SCOPES)[number];
-export type AttackKbLlmCacheProvider = "disabled" | "local" | "redis";
+export type AttackKbLlmCacheProvider = "disabled" | "local" | "redis" | "langcache";
 
 export type AttackKbLlmCacheConfig = {
   provider: AttackKbLlmCacheProvider;
@@ -20,6 +20,14 @@ export type AttackKbLlmCacheConfig = {
   redis: {
     url?: string;
     keyPrefix: string;
+    fallbackToLocal: boolean;
+    timeoutMs: number;
+  };
+  langCache: {
+    host?: string;
+    cacheId?: string;
+    apiKey?: string;
+    similarityThreshold: number;
     fallbackToLocal: boolean;
     timeoutMs: number;
   };
@@ -37,7 +45,7 @@ export type AttackKbLlmCacheKey = {
   model: string;
   inputHash: string;
   payloadHash: string;
-  exact: true;
+  exact: boolean;
 };
 
 export type AttackKbLlmCacheHit<T> = AttackKbLlmCacheKey & {
@@ -96,6 +104,7 @@ const DEFAULT_REDIS_KEY_PREFIX = "attack-kb:llm-cache";
 
 let defaultCache: AttackKbLlmCache | undefined;
 let warnedAboutRedisFallback = false;
+let warnedAboutLangCacheFallback = false;
 
 function env(name: string): string | undefined {
   const value = process.env[name]?.trim();
@@ -157,8 +166,12 @@ function parseCacheProvider(value: string | undefined): AttackKbLlmCacheProvider
     return "redis";
   }
 
+  if (["langcache", "redis-langcache", "semantic"].includes(normalized)) {
+    return "langcache";
+  }
+
   throw new Error(
-    `Unsupported ATTACK_KB_LLM_CACHE: ${value}. Supported values: disabled, local, redis.`,
+    `Unsupported ATTACK_KB_LLM_CACHE: ${value}. Supported values: disabled, local, redis, langcache.`,
   );
 }
 
@@ -323,6 +336,18 @@ function warnRedisFallback(reason: unknown): void {
   warnedAboutRedisFallback = true;
 }
 
+function warnLangCacheFallback(reason: unknown): void {
+  if (warnedAboutLangCacheFallback) {
+    return;
+  }
+
+  const message = reason instanceof Error ? reason.message : String(reason);
+  process.emitWarning(`Attack KB LangCache falling back to local memory: ${message}`, {
+    code: "ATTACK_KB_LANGCACHE_FALLBACK",
+  });
+  warnedAboutLangCacheFallback = true;
+}
+
 export function getAttackKbLlmCacheConfig(): AttackKbLlmCacheConfig {
   const redisConnection = readAttackKbRedisConnectionConfig();
 
@@ -334,6 +359,14 @@ export function getAttackKbLlmCacheConfig(): AttackKbLlmCacheConfig {
       keyPrefix: normalizeKeyPrefix(env("ATTACK_KB_REDIS_CACHE_KEY_PREFIX") || DEFAULT_REDIS_KEY_PREFIX),
       fallbackToLocal: parseRedisFallback(env("ATTACK_KB_REDIS_CACHE_FALLBACK")),
       timeoutMs: parsePositiveIntegerEnv("ATTACK_KB_REDIS_CACHE_TIMEOUT_MS", DEFAULT_REDIS_TIMEOUT_MS),
+    },
+    langCache: {
+      host: env("LANGCACHE_HOST"),
+      cacheId: env("LANGCACHE_CACHE_ID"),
+      apiKey: env("LANGCACHE_API_KEY"),
+      similarityThreshold: Number(env("LANGCACHE_THRESHOLD") || "0.82"),
+      fallbackToLocal: parseRedisFallback(env("ATTACK_KB_LANGCACHE_FALLBACK") || env("ATTACK_KB_REDIS_CACHE_FALLBACK")),
+      timeoutMs: parsePositiveIntegerEnv("ATTACK_KB_LANGCACHE_TIMEOUT_MS", 10_000),
     },
   };
 }
@@ -524,6 +557,204 @@ export function createRedisAttackKbLlmCache(
   return cache;
 }
 
+function buildUnsupportedLangCacheError(config: AttackKbLlmCacheConfig): Error {
+  return new Error(
+    [
+      "Attack KB LangCache is enabled but managed LangCache credentials are missing or unavailable.",
+      "Set LANGCACHE_HOST, LANGCACHE_CACHE_ID, and LANGCACHE_API_KEY. Set ATTACK_KB_LANGCACHE_FALLBACK=local to fail open, or ATTACK_KB_LLM_CACHE=disabled to bypass the cache.",
+      `cacheId=${config.langCache.cacheId ? "set" : "missing"}`,
+    ].join(" "),
+  );
+}
+
+function langCacheApiBaseUrl(config: AttackKbLlmCacheConfig): string | undefined {
+  const rawHost = config.langCache.host?.trim().replace(/\/+$/u, "");
+  if (!rawHost || !config.langCache.cacheId) {
+    return undefined;
+  }
+
+  const host = /^https?:\/\//iu.test(rawHost) ? rawHost : `https://${rawHost}`;
+  return `${host}/v1/caches/${encodeURIComponent(config.langCache.cacheId)}`;
+}
+
+function langCacheHeaders(config: AttackKbLlmCacheConfig): Record<string, string> {
+  return {
+    Accept: "application/json",
+    Authorization: `Bearer ${config.langCache.apiKey ?? ""}`,
+    "Content-Type": "application/json",
+  };
+}
+
+function langCachePrompt(request: AttackKbLlmCacheRequest): string {
+  if (typeof request.input === "string") {
+    return request.input;
+  }
+
+  const input = request.input as { messages?: Array<{ role?: string; content?: unknown }> };
+  if (Array.isArray(input?.messages)) {
+    return input.messages
+      .map((message) => `${message.role ?? "message"}: ${typeof message.content === "string" ? message.content : canonicalJson(message.content)}`)
+      .join("\n");
+  }
+
+  return canonicalJson(request.input);
+}
+
+function langCacheAttributes(request: AttackKbLlmCacheRequest): Record<string, string> {
+  return {
+    task: request.task,
+    model: request.model,
+    component: "attack-kb",
+  };
+}
+
+async function fetchLangCacheJson(
+  config: AttackKbLlmCacheConfig,
+  path: string,
+  body?: unknown,
+): Promise<unknown> {
+  const baseUrl = langCacheApiBaseUrl(config);
+  if (!baseUrl || !config.langCache.apiKey) {
+    throw buildUnsupportedLangCacheError(config);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.langCache.timeoutMs);
+
+  try {
+    const response = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: langCacheHeaders(config),
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`LangCache API ${response.status}: ${text.slice(0, 240)}`);
+    }
+
+    return response.headers.get("content-type")?.includes("application/json") ? response.json() : {};
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function langCacheEntries(payload: unknown): Array<{ response?: unknown; similarity?: unknown; prompt?: unknown }> {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const data = (payload as { data?: unknown; entries?: unknown }).data ?? (payload as { entries?: unknown }).entries;
+  return Array.isArray(data) ? (data as Array<{ response?: unknown; similarity?: unknown; prompt?: unknown }>) : [];
+}
+
+function materializeLangCacheHit<T>(
+  request: AttackKbLlmCacheRequest,
+  key: AttackKbLlmCacheKey,
+  serialized: string,
+): AttackKbLlmCacheHit<T> | undefined {
+  const entry = parseStoredEntry(serialized);
+
+  if (!entry || entry.task !== request.task || entry.model !== key.model || isExpired(entry.expiresAt)) {
+    return undefined;
+  }
+
+  return {
+    ...key,
+    exact: entry.inputHash === key.inputHash,
+    provider: "langcache",
+    hit: true,
+    value: entry.value as T,
+    createdAt: entry.createdAt,
+    expiresAt: entry.expiresAt,
+  };
+}
+
+export function createLangCacheAttackKbLlmCache(
+  config: AttackKbLlmCacheConfig,
+  fallback: AttackKbLlmCache = createLocalAttackKbLlmCache({
+    ttlSeconds: config.ttlSeconds,
+    keyPrefix: config.redis.keyPrefix,
+  }),
+): AttackKbLlmCache {
+  async function useFallbackOrThrow<T>(
+    reason: unknown,
+    operation: (fallbackCache: AttackKbLlmCache) => Promise<T>,
+  ): Promise<T> {
+    if (config.langCache.fallbackToLocal) {
+      warnLangCacheFallback(reason);
+      return operation(fallback);
+    }
+
+    throw reason instanceof Error ? reason : buildUnsupportedLangCacheError(config);
+  }
+
+  const cache: AttackKbLlmCache = {
+    provider: "langcache",
+    async get<T>(request: AttackKbLlmCacheRequest) {
+      const key = buildAttackKbLlmCacheKey(request, config.redis.keyPrefix);
+
+      try {
+        const payload = await fetchLangCacheJson(config, "/entries/search", {
+          prompt: langCachePrompt(request),
+          attributes: langCacheAttributes(request),
+          similarityThreshold: config.langCache.similarityThreshold,
+          searchStrategies: ["exact", "semantic"],
+        });
+        const entry = langCacheEntries(payload)[0];
+        if (typeof entry?.response !== "string") {
+          return undefined;
+        }
+
+        return materializeLangCacheHit<T>(request, key, entry.response);
+      } catch (error) {
+        return useFallbackOrThrow(error, (fallbackCache) => fallbackCache.get<T>(request));
+      }
+    },
+    async set<T>(request: AttackKbLlmCacheRequest, value: T) {
+      const key = buildAttackKbLlmCacheKey(request, config.redis.keyPrefix);
+      const entry = createStoredEntry(request, key, value, config.ttlSeconds);
+      const serialized = serializeStoredEntry(entry);
+
+      try {
+        await fetchLangCacheJson(config, "/entries", {
+          prompt: langCachePrompt(request),
+          response: serialized,
+          attributes: langCacheAttributes(request),
+        });
+
+        return {
+          ...key,
+          provider: "langcache",
+          expiresAt: entry.expiresAt,
+        };
+      } catch (error) {
+        return useFallbackOrThrow(error, (fallbackCache) => fallbackCache.set(request, value));
+      }
+    },
+    async wrap<T>(request: AttackKbLlmCacheRequest, loader: () => Promise<T>) {
+      return wrapWithCache(cache, request, loader);
+    },
+    async close() {
+      await fallback.close?.();
+    },
+  };
+
+  return cache;
+}
+
+export async function flushConfiguredLangCache(
+  config: AttackKbLlmCacheConfig = getAttackKbLlmCacheConfig(),
+): Promise<boolean> {
+  await fetchLangCacheJson(config, "/flush");
+  return true;
+}
+
+export function isLangCacheConfigured(config: AttackKbLlmCacheConfig = getAttackKbLlmCacheConfig()): boolean {
+  return Boolean(langCacheApiBaseUrl(config) && config.langCache.apiKey);
+}
+
 export function createAttackKbLlmCache(
   config: AttackKbLlmCacheConfig = getAttackKbLlmCacheConfig(),
 ): AttackKbLlmCache {
@@ -541,6 +772,10 @@ export function createAttackKbLlmCache(
     });
   }
 
+  if (config.provider === "langcache") {
+    return createLangCacheAttackKbLlmCache(config);
+  }
+
   return createRedisAttackKbLlmCache(config);
 }
 
@@ -552,6 +787,7 @@ export function getDefaultAttackKbLlmCache(): AttackKbLlmCache {
 export function resetDefaultAttackKbLlmCacheForTests(): void {
   defaultCache = undefined;
   warnedAboutRedisFallback = false;
+  warnedAboutLangCacheFallback = false;
 }
 
 function encodeRedisCommand(args: string[]): Buffer {

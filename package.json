@@ -10,6 +10,8 @@
     "weave:smoke": "tsx src/smoke.ts",
     "attack-kb:config": "tsx attack-kb/src/print-config.ts",
     "attack-kb:redis-health": "tsx attack-kb/src/redis/health.ts",
+    "attack-kb:iris-health": "tsx attack-kb/src/iris/health.ts",
+    "attack-kb:langcache-smoke": "tsx attack-kb/src/iris/langcache-smoke.ts",
     "attack-kb:probe": "tsx attack-kb/src/probe-demo.ts",
     "attack-kb:ingest": "tsx attack-kb/src/ingest-demo.ts",
     "attack-kb:curation-ui": "tsx attack-kb/src/curation/server.ts",
