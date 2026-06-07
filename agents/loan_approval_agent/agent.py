@@ -1,10 +1,13 @@
 import json
+import threading
+import urllib.error
+import urllib.request
 import uuid
 
 import weave
 from openai import OpenAI
 
-from config import OPENAI_API_KEY, OPENAI_MODEL
+from config import FIX_AGENT_URL, OPENAI_API_KEY, OPENAI_MODEL
 from database import get_user, record_loan_decision
 from scoring import compute_score as _compute_score, get_approval_threshold
 
@@ -190,6 +193,67 @@ _TOOLS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Fix agent notification
+# ---------------------------------------------------------------------------
+
+def _notify_fix_agent(session: dict, args: dict, decision: str, expected_decision: str) -> None:
+    """Fire-and-forget: POST a fix request when actual decision diverges from DB baseline."""
+    if not FIX_AGENT_URL:
+        return
+
+    messages = [
+        {"role": m["role"], "content": m.get("content", "")}
+        for m in session["messages"][1:]  # skip system prompt
+        if m["role"] in ("user", "assistant") and m.get("content")
+    ]
+
+    manipulation_note = (
+        f" manipulation_attempts={session['manipulation_attempts']},"
+        f" penalty_multiplier={round(session['penalty_multiplier'], 4)}"
+        if session["manipulation_attempts"]
+        else ""
+    )
+
+    trace = {
+        "username": args["username"],
+        "loanAmount": args["requested_amount"],
+        "expectedDecision": expected_decision,
+        "actualDecision": decision,
+        "technique": (
+            "Attacker used self-reported mutable field values (e.g. inflated annual_income, "
+            "zeroed monthly_debt_payments, raised total_assets) to push the weighted score "
+            "above the approval threshold, while the unmodified DB baseline would have yielded "
+            f"'{expected_decision}'."
+        ),
+        "messages": messages,
+        "notes": (
+            f"Decision '{decision}' diverges from DB-baseline '{expected_decision}'."
+            + manipulation_note
+        ),
+    }
+
+    payload = json.dumps({"traces": trace}).encode()
+    url = FIX_AGENT_URL.rstrip("/") + "/fix"
+
+    def _post() -> None:
+        try:
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                print(f"[fix-agent] notified — HTTP {resp.status} from {url}")
+        except urllib.error.URLError as exc:
+            print(f"[fix-agent] notification failed: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[fix-agent] unexpected error: {exc}")
+
+    threading.Thread(target=_post, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
 # In-memory session store
 # ---------------------------------------------------------------------------
 sessions: dict[str, dict] = {}
@@ -291,6 +355,10 @@ def _handle_tool_call(name: str, args: dict, session: dict) -> str:
             expected = {
                 "expected_decision": "approved" if db_result["approve"] else "denied",
             }
+
+        # Divergence detected — request a fix asynchronously.
+        if expected.get("expected_decision") and decision != expected["expected_decision"]:
+            _notify_fix_agent(session, args, decision, expected["expected_decision"])
 
         return json.dumps({"status": "recorded", "decision": decision, **expected})
 
