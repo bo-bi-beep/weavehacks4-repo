@@ -139,7 +139,9 @@ ATTACK_KB_REDIS_EVENTS_STREAM=attack-kb:events
 ATTACK_KB_REDIS_CURATION_STREAM=attack-kb:curation:events
 ```
 
-The adapter stores canonical objects in RedisJSON when `JSON.SET`/`JSON.GET` are available, otherwise it falls back to Redis string `SET`/`GET` JSON values under the same namespaced keys. The default storage factory seeds a fresh Redis namespace with canonical KB seeds on first use via `putMany`, matching the local demo behavior. If the Redis URL is missing or the connection fails, `ATTACK_KB_REDIS_IRIS_FALLBACK=local` keeps the seeded local fallback for demos; disabling fallback makes configuration/connection failures throw clear errors.
+The adapter stores canonical objects under `<namespace>:<index>:object:<id>` and tracks IDs in `<namespace>:<index>:ids`. It uses RedisJSON when `JSON.SET`/`JSON.GET` are available; otherwise it falls back to Redis string `SET`/`GET` JSON values under the same namespaced keys. When RedisJSON plus Redis Query Engine/RediSearch `FT.*` commands are available, the adapter best-effort ensures `ATTACK_KB_REDIS_IRIS_INDEX` as an `FT.CREATE ON JSON` index over canonical object keys and uses `FT.SEARCH` for `list` queries with `objectType`, `domain`, `text`, or `limit`. If RedisJSON or search is unavailable, list queries fall back to the existing Redis ID-set scan plus JS-side filtering. The default storage factory seeds a fresh Redis namespace with canonical KB seeds on first use via `putMany`, matching the local demo behavior. If the Redis URL is missing or the connection fails, `ATTACK_KB_REDIS_IRIS_FALLBACK=local` keeps the seeded local fallback for demos; disabling fallback makes configuration/connection failures throw clear errors.
+
+The P0 Query Engine schema indexes `objectType`, `domain`, `tags`, and `sourceRefs` as TAG fields; `title`, `description`, `payload.content`, `payload.description`, `payload.template`, and `payload.code` as TEXT fields; and `updatedAt`/`version` as sortable fields. Redis Cloud databases or local Redis Stack instances must include RedisJSON and Query Engine/RediSearch for the indexed path. Plain Redis can still store string JSON and run JS-side filtering, but it will not satisfy the visible Query Engine path.
 
 Optional Redis smoke against a local Redis/Redis Stack or Redis Cloud instance:
 
@@ -148,6 +150,43 @@ npm run attack-kb:redis-smoke
 ```
 
 The smoke command writes the canonical seed objects through Redis and reads one back; it requires `REDIS_URL` or `ATTACK_KB_REDIS_IRIS_URL` and does not use the local fallback.
+
+## Vector/hybrid retrieval
+
+`attack-kb/src/retrieval/` exposes `searchAttackKbSemanticContext(query, filters, options)` for semantic context lookup over canonical KB objects. It materializes object text from titles, descriptions, tags, payload fields, provenance/evidence, domain scenarios, business routes, system patterns, curation outcomes, and success signals; then chunks that text for retrieval.
+
+Default retrieval is deterministic and local: `ATTACK_KB_EMBEDDING_PROVIDER=deterministic` hashes tokens into a configurable `Float32Array` dimension (default `384`) and reranks chunks with a vector score plus a lexical overlap score. It makes no OpenAI calls and works without Redis.
+
+Redis mode is opt-in. It stores retrieval chunks as Redis hashes under `<ATTACK_KB_VECTOR_KEY_PREFIX>:chunk:<objectId>:<chunkOrdinal>` and creates a RediSearch vector index with metadata TAG filters:
+
+```bash
+ATTACK_KB_VECTOR_BACKEND=redis # local | redis | auto
+ATTACK_KB_VECTOR_REDIS_URL=redis://localhost:6379 # optional; otherwise reuses ATTACK_KB_REDIS_IRIS_URL/REDIS_URL
+ATTACK_KB_VECTOR_INDEX=attack-kb-vector
+ATTACK_KB_VECTOR_KEY_PREFIX=attack-kb:vector
+ATTACK_KB_VECTOR_INDEX_ALGORITHM=HNSW # or FLAT
+ATTACK_KB_VECTOR_DIMENSIONS=384
+ATTACK_KB_VECTOR_MATERIALIZE_ON_SEARCH=true
+ATTACK_KB_VECTOR_REDIS_FALLBACK=local
+ATTACK_KB_EMBEDDING_PROVIDER=deterministic
+ATTACK_KB_OPENAI_EMBEDDING_MODEL=text-embedding-3-small # seam only in P0; real calls deferred
+```
+
+The RediSearch schema is `ON HASH` with `objectId`, `chunkId`, `objectType`, `domain`, `status`, and `sourceCategory` as `TAG` fields, `title`/`text` as `TEXT`, and `embedding VECTOR HNSW|FLAT TYPE FLOAT32 DIM <n> DISTANCE_METRIC COSINE`. Hybrid filters are applied in the Redis query, for example `(@domain:{credit_loan} @objectType:{business_attack_route})=>[KNN 20 @embedding $query_vector AS vector_distance]`; the returned candidates are then locally reranked with the same lexical boost used by deterministic fallback.
+
+Sample API use:
+
+```ts
+import { searchAttackKbSemanticContext } from "./attack-kb/src/retrieval/index.js";
+
+const context = await searchAttackKbSemanticContext(
+  "income verification business route with tool misuse evidence",
+  { domain: "credit_loan", objectType: ["business_attack_route", "system_attack_pattern"] },
+  { limit: 5 },
+);
+```
+
+Deferred work: production OpenAI embeddings through the traced Attack KB runtime, batch embedding refresh/invalidation, Redis Context Retriever/Iris service integration, and recommendation-builder ranking integration.
 
 ## Agent Memory adapter
 
@@ -293,7 +332,8 @@ attack-kb/
     curation/       queue primitive plus local HITL curation UI, API, auto-review, and smoke test
     ingestion/      source/data ingestion entrypoints, samples, and Weave tracing wrapper
     cache/          exact-key LLM cache seam with no-op, local, and Redis providers
-    redis/          Redis client/env helper, streams/event support, and health/config report command
+    retrieval/      deterministic + Redis vector/hybrid semantic context retrieval
+    redis/          Redis client/env helper, Query Engine index/search support, streams/events, and health/config report command
     memory/         run/outcome Agent Memory adapter with local fallback and Redis KV backend
     storage/        storage interface, local memory/json fallback, Redis-backed adapter
 ```
@@ -305,4 +345,4 @@ Current deterministic KB entities include:
 - `BusinessAttackRoute` — defensive business-route checks that compose financial factors with system-level patterns.
 - `AttackRecommendation` — output DTO. Probing recommendations reference `ReconProbe`; rich-profile attack recommendations include `composition`, `businessAttackRouteRefs`, `domainScenarioRefs`, and `systemPatternRefs`.
 
-Future follow-up work can add Redis query-engine/vector/streams/memory/cache usage and connect the main attack agent to this subsystem over its final API boundary.
+Future follow-up work can connect the retrieval API to Redis Context Retriever/Iris services, add production embedding refresh/invalidation, and connect the main attack agent to this subsystem over its final API boundary.

@@ -7,12 +7,14 @@ import {
   validateAttackKbRuntimeEnv,
 } from "./config.js";
 import { getAttackKbMemoryConfig } from "./memory/index.js";
+import { getAttackKbVectorRetrievalConfig } from "./retrieval/index.js";
 import { getAttackKbStorageConfig } from "./storage/index.js";
 
 const config = getAttackKbRuntimeConfig();
 const storageConfig = getAttackKbStorageConfig();
 const memoryConfig = getAttackKbMemoryConfig();
 const cacheConfig = getAttackKbLlmCacheConfig();
+const retrievalConfig = getAttackKbVectorRetrievalConfig();
 const missing = validateAttackKbRuntimeEnv(config);
 
 console.log(
@@ -56,6 +58,25 @@ console.log(
           fallbackToLocal: cacheConfig.redis.fallbackToLocal,
           timeoutMs: cacheConfig.redis.timeoutMs,
         },
+      },
+      retrieval: {
+        backend: retrievalConfig.backend,
+        embedding: {
+          provider: retrievalConfig.embedding.provider,
+          dimensions: retrievalConfig.embedding.dimensions,
+          openAIModel: retrievalConfig.embedding.openAIModel,
+          deterministicSeed: retrievalConfig.embedding.deterministicSeed ? "set" : "missing",
+        },
+        redisVector: {
+          url: retrievalConfig.redis.url ? "set" : "missing",
+          urlSource: retrievalConfig.redis.urlSource ?? null,
+          indexName: retrievalConfig.redis.indexName,
+          keyPrefix: retrievalConfig.redis.keyPrefix,
+          indexAlgorithm: retrievalConfig.redis.indexAlgorithm,
+          materializeOnSearch: retrievalConfig.redis.materializeOnSearch,
+          fallbackToLocal: retrievalConfig.redis.fallbackToLocal,
+        },
+        maxChunkChars: retrievalConfig.maxChunkChars,
       },
       missing,
     },

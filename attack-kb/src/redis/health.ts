@@ -3,7 +3,9 @@ import "dotenv/config";
 import { connect as connectNet, type Socket } from "node:net";
 import { connect as connectTls } from "node:tls";
 
+import { getAttackKbVectorRetrievalConfig } from "../retrieval/index.js";
 import { getAttackKbStorageConfig } from "../storage/index.js";
+import { ATTACK_KB_REDIS_OBJECT_INDEX_SCHEMA } from "./query-engine.js";
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "y", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "n", "off", ""]);
@@ -82,7 +84,7 @@ function summarizeRedisUrl(rawUrl: string | undefined): RedisUrlSummary {
       tls: "unknown",
       username: "missing",
       password: "missing",
-      issue: "ATTACK_KB_REDIS_IRIS_URL is not set.",
+      issue: "Neither ATTACK_KB_REDIS_IRIS_URL nor REDIS_URL is set.",
     };
   }
 
@@ -96,7 +98,7 @@ function summarizeRedisUrl(rawUrl: string | undefined): RedisUrlSummary {
       tls: "unknown",
       username: "missing",
       password: "missing",
-      issue: "ATTACK_KB_REDIS_IRIS_URL is not a valid URL.",
+      issue: "Configured Redis URL is not a valid URL.",
     };
   }
 
@@ -160,7 +162,7 @@ async function pingRedis(rawUrl: string, timeoutMs: number): Promise<RedisReadin
       status: "failed",
       timeoutMs,
       checkedAt: new Date().toISOString(),
-      detail: "ATTACK_KB_REDIS_IRIS_URL is not a valid URL.",
+      detail: "Configured Redis URL is not a valid URL.",
     };
   }
 
@@ -276,7 +278,7 @@ async function readiness(rawUrl: string | undefined): Promise<RedisReadiness> {
       status: "missing_url",
       timeoutMs,
       checkedAt: new Date().toISOString(),
-      detail: "Cannot check Redis reachability because ATTACK_KB_REDIS_IRIS_URL is not set.",
+      detail: "Cannot check Redis reachability because neither ATTACK_KB_REDIS_IRIS_URL nor REDIS_URL is set.",
     };
   }
 
@@ -284,8 +286,11 @@ async function readiness(rawUrl: string | undefined): Promise<RedisReadiness> {
 }
 
 const storageConfig = getAttackKbStorageConfig();
-const redisUrl = env("ATTACK_KB_REDIS_IRIS_URL");
+const retrievalConfig = getAttackKbVectorRetrievalConfig();
+const redisUrl = storageConfig.redisIris.url;
 const keyPrefix = env("ATTACK_KB_REDIS_KEY_PREFIX") || storageConfig.redisIris.namespace;
+const objectStoragePrefix = `${storageConfig.redisIris.namespace}:${storageConfig.redisIris.indexName}`;
+const objectKeyPrefix = `${objectStoragePrefix}:object:`;
 const eventsStream = env("ATTACK_KB_REDIS_EVENTS_STREAM") || `${keyPrefix}:events`;
 const curationStream = env("ATTACK_KB_REDIS_CURATION_STREAM") || `${keyPrefix}:curation:events`;
 const connectReadiness = await readiness(redisUrl);
@@ -296,6 +301,7 @@ const report = {
   storage: {
     adapter: storageConfig.provider,
     redisIris: {
+      urlSource: storageConfig.redisIris.urlSource ?? "unset",
       url: summarizeRedisUrl(redisUrl),
       indexName: storageConfig.redisIris.indexName,
       namespace: storageConfig.redisIris.namespace,
@@ -304,11 +310,18 @@ const report = {
   },
   intendedRedisNames: {
     keyPrefix,
-    objectKeyPattern: `${keyPrefix}:object:<objectType>:<id>`,
-    sourceArtifactKeyPattern: `${keyPrefix}:object:source_artifact:<id>`,
-    ingestedDataItemKeyPattern: `${keyPrefix}:object:ingested_data_item:<id>`,
-    curationCandidateKeyPattern: `${keyPrefix}:object:curation_candidate:<id>`,
+    objectStoragePrefix,
+    objectIdsSet: `${objectStoragePrefix}:ids`,
+    objectKeyPattern: `${objectKeyPrefix}<id>`,
+    sourceArtifactKeyPattern: `${objectKeyPrefix}<source-artifact-id>`,
+    ingestedDataItemKeyPattern: `${objectKeyPrefix}<ingested-data-item-id>`,
+    curationCandidateKeyPattern: `${objectKeyPrefix}<curation-candidate-id>`,
     searchIndex: storageConfig.redisIris.indexName,
+    searchIndexMode: "FT.CREATE ON JSON",
+    searchIndexPrefix: objectKeyPrefix,
+    searchIndexSchema: ATTACK_KB_REDIS_OBJECT_INDEX_SCHEMA,
+    vectorIndex: retrievalConfig.redis.indexName,
+    vectorChunkKeyPattern: `${retrievalConfig.redis.keyPrefix}:chunk:<objectId>:<chunkOrdinal>`,
     eventsStream,
     curationStream,
   },
@@ -326,7 +339,8 @@ const report = {
     "SLOWLOG GET 20",
     "MEMORY DOCTOR",
     `FT.INFO ${storageConfig.redisIris.indexName}`,
-    `FT.PROFILE ${storageConfig.redisIris.indexName} SEARCH QUERY \"*\" LIMIT 0 5`,
+    `FT.INFO ${retrievalConfig.redis.indexName}`,
+    `FT.PROFILE ${retrievalConfig.redis.indexName} SEARCH QUERY \"*=>[KNN 5 @embedding $query_vector AS vector_distance]\" PARAMS 2 query_vector <FLOAT32_BLOB> SORTBY vector_distance ASC DIALECT 2`,
   ],
   envVars: {
     existingStorage: [
@@ -337,6 +351,20 @@ const report = {
       "ATTACK_KB_REDIS_IRIS_NAMESPACE",
       "ATTACK_KB_REDIS_IRIS_FALLBACK",
     ],
+    vectorRetrieval: [
+      "ATTACK_KB_VECTOR_BACKEND",
+      "ATTACK_KB_VECTOR_REDIS_URL",
+      "ATTACK_KB_VECTOR_INDEX",
+      "ATTACK_KB_VECTOR_KEY_PREFIX",
+      "ATTACK_KB_VECTOR_INDEX_ALGORITHM",
+      "ATTACK_KB_VECTOR_REDIS_FALLBACK",
+      "ATTACK_KB_VECTOR_MATERIALIZE_ON_SEARCH",
+      "ATTACK_KB_VECTOR_DIMENSIONS",
+      "ATTACK_KB_VECTOR_MAX_CHUNK_CHARS",
+      "ATTACK_KB_EMBEDDING_PROVIDER",
+      "ATTACK_KB_VECTOR_DETERMINISTIC_SEED",
+      "ATTACK_KB_OPENAI_EMBEDDING_MODEL",
+    ],
     reportingOnly: [
       "ATTACK_KB_REDIS_KEY_PREFIX",
       "ATTACK_KB_REDIS_EVENTS_STREAM",
@@ -345,9 +373,9 @@ const report = {
       "ATTACK_KB_REDIS_HEALTH_TIMEOUT_MS",
     ],
   },
-  openIntegration: {
-    redisClientIssue: "#22 concrete Redis client should consume these env vars/logical names and replace the redis-iris stub behind AttackKbStorageAdapter.",
-    currentBehavior: "This command does not instantiate the Redis storage adapter and does not require Redis reachability unless ATTACK_KB_REDIS_HEALTH_CONNECT=1.",
+  adapterIntegration: {
+    storageBoundary: "attack-kb/src/storage/redis-iris.ts implements Redis behind AttackKbStorageAdapter.",
+    currentBehavior: "This command does not instantiate the Redis storage adapter and does not require Redis reachability unless ATTACK_KB_REDIS_HEALTH_CONNECT=1. The adapter best-effort creates the FT.CREATE JSON index when RedisJSON and Query Engine/RediSearch are available.",
   },
 };
 

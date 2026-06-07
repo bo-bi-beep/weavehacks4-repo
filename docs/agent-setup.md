@@ -40,6 +40,13 @@ export ATTACK_KB_RECOMMENDER_MODEL=gpt-4.1
 # Optional Attack KB LLM cache. Keep disabled unless you want local/Redis exact-key caching.
 export ATTACK_KB_LLM_CACHE=disabled # disabled | local | redis
 export ATTACK_KB_LLM_CACHE_TTL_SECONDS=86400
+
+# Optional Attack KB vector/hybrid retrieval. Keep local for no-network deterministic demos;
+# use redis/auto only when Redis Stack/RediSearch is configured.
+export ATTACK_KB_VECTOR_BACKEND=local # local | redis | auto
+export ATTACK_KB_EMBEDDING_PROVIDER=deterministic
+export ATTACK_KB_VECTOR_INDEX=attack-kb-vector
+export ATTACK_KB_VECTOR_DIMENSIONS=384
 ```
 
 ## Attack KB runtime

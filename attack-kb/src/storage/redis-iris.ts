@@ -4,6 +4,12 @@ import {
   type AttackKbRedisClient,
   type AttackKbRedisUrlSource,
 } from "../redis/client.js";
+import {
+  ensureAttackKbObjectSearchIndex,
+  searchAttackKbObjectIds,
+  shouldUseAttackKbRedisQueryEngine,
+  type AttackKbRedisQueryEngineState,
+} from "../redis/query-engine.js";
 import { matchesAttackKbStorageQuery } from "./query.js";
 import type { AttackKbStorageAdapter, AttackKbStorageQuery } from "./types.js";
 
@@ -25,13 +31,16 @@ type RedisDocumentMode = "redis-json" | "string-json";
 type RedisConnectionState = {
   client: AttackKbRedisClient;
   documentMode: RedisDocumentMode;
+  queryEngine?: AttackKbRedisQueryEngineState;
 };
 
 const FALLBACK_WARNING_CODE = "ATTACK_KB_REDIS_IRIS_FALLBACK";
 const STRING_MODE_WARNING_CODE = "ATTACK_KB_REDIS_IRIS_STRING_JSON";
+const QUERY_ENGINE_WARNING_CODE = "ATTACK_KB_REDIS_QUERY_ENGINE_UNAVAILABLE";
 
 let warnedAboutFallback = false;
 let warnedAboutStringMode = false;
+let warnedAboutQueryEngine = false;
 
 function storagePrefix(config: RedisIrisAttackKbStorageConfig): string {
   return `${config.namespace}:${config.indexName}`;
@@ -41,8 +50,12 @@ function objectIdsKey(config: RedisIrisAttackKbStorageConfig): string {
   return `${storagePrefix(config)}:ids`;
 }
 
+function objectKeyPrefix(config: RedisIrisAttackKbStorageConfig): string {
+  return `${storagePrefix(config)}:object:`;
+}
+
 function objectKey(config: RedisIrisAttackKbStorageConfig, id: string): string {
-  return `${storagePrefix(config)}:object:${id}`;
+  return `${objectKeyPrefix(config)}${id}`;
 }
 
 function jsonProbeKey(config: RedisIrisAttackKbStorageConfig): string {
@@ -77,6 +90,18 @@ function warnStringMode(config: RedisIrisAttackKbStorageConfig, reason: string):
     { code: STRING_MODE_WARNING_CODE },
   );
   warnedAboutStringMode = true;
+}
+
+function warnQueryEngineUnavailable(config: RedisIrisAttackKbStorageConfig, reason: string): void {
+  if (warnedAboutQueryEngine) {
+    return;
+  }
+
+  process.emitWarning(
+    `Redis Query Engine search is unavailable for ${config.namespace}/${config.indexName} (${reason}); canonical Attack KB list queries will use Redis key/id scan plus JS-side filtering.`,
+    { code: QUERY_ENGINE_WARNING_CODE },
+  );
+  warnedAboutQueryEngine = true;
 }
 
 function missingUrlError(config: RedisIrisAttackKbStorageConfig): Error {
@@ -261,7 +286,19 @@ export function createRedisIrisAttackKbStorageAdapter(
 
     await client.connect();
     const documentMode = await detectDocumentMode(client, config);
-    return { client, documentMode };
+    const queryEngine =
+      documentMode === "redis-json"
+        ? await ensureAttackKbObjectSearchIndex(client, {
+            indexName: config.indexName,
+            objectKeyPrefix: objectKeyPrefix(config),
+          })
+        : undefined;
+
+    if (queryEngine && !queryEngine.available) {
+      warnQueryEngineUnavailable(config, queryEngine.reason ?? "FT.CREATE failed");
+    }
+
+    return { client, documentMode, queryEngine };
   }
 
   async function getConnection(): Promise<RedisConnectionState> {
@@ -371,16 +408,16 @@ export function createRedisIrisAttackKbStorageAdapter(
     return stringGetObject(state.client, key);
   }
 
-  async function listRedisObjects(
+  async function collectRedisObjectsByIds(
     state: RedisConnectionState,
+    ids: string[],
     query: AttackKbStorageQuery,
   ): Promise<AttackKbCanonicalObject[]> {
-    const ids = Array.isArray(query.ids)
-      ? [...new Set(query.ids)]
-      : await state.client.sMembers(objectIdsKey(config));
-
     const results: AttackKbCanonicalObject[] = [];
-    const limit = typeof query.limit === "number" ? Math.max(0, query.limit) : undefined;
+    const limit =
+      typeof query.limit === "number" && Number.isFinite(query.limit)
+        ? Math.max(0, Math.trunc(query.limit))
+        : undefined;
 
     if (limit === 0) {
       return results;
@@ -399,6 +436,54 @@ export function createRedisIrisAttackKbStorageAdapter(
     }
 
     return results;
+  }
+
+  async function listRedisObjectsByIdScan(
+    state: RedisConnectionState,
+    query: AttackKbStorageQuery,
+  ): Promise<AttackKbCanonicalObject[]> {
+    const ids = Array.isArray(query.ids)
+      ? [...new Set(query.ids)]
+      : await state.client.sMembers(objectIdsKey(config));
+
+    return collectRedisObjectsByIds(state, ids, query);
+  }
+
+  async function listRedisObjectsWithSearch(
+    state: RedisConnectionState,
+    query: AttackKbStorageQuery,
+  ): Promise<AttackKbCanonicalObject[]> {
+    if (!state.queryEngine?.available) {
+      return listRedisObjectsByIdScan(state, query);
+    }
+
+    const searchResult = await searchAttackKbObjectIds(state.client, state.queryEngine, query);
+    return collectRedisObjectsByIds(state, searchResult.ids, query);
+  }
+
+  async function listRedisObjects(
+    state: RedisConnectionState,
+    query: AttackKbStorageQuery,
+  ): Promise<AttackKbCanonicalObject[]> {
+    if (state.queryEngine?.available && shouldUseAttackKbRedisQueryEngine(query)) {
+      try {
+        return await listRedisObjectsWithSearch(state, query);
+      } catch (error) {
+        if (isRedisConnectionError(error)) {
+          throw error;
+        }
+
+        state.queryEngine = {
+          ...state.queryEngine,
+          available: false,
+          status: "unavailable",
+          reason: errorMessage(error),
+        };
+        warnQueryEngineUnavailable(config, errorMessage(error));
+      }
+    }
+
+    return listRedisObjectsByIdScan(state, query);
   }
 
   return {
