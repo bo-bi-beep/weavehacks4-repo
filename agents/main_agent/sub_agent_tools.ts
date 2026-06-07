@@ -2,6 +2,18 @@ import { tool, type Tool } from "@openai/agents";
 
 import type { SubAgentService } from "../sub_agents/service.js";
 
+export interface SubAgentToolOptions {
+  /**
+   * Runs automatically before each `ask_sub_agent` delegation. Receives the
+   * orchestrator's message and sub-agent id, and returns the evolved attack
+   * instruction sent to the sub-agent (trace load -> insight extract -> synthesize).
+   */
+  beforeAskSubAgent?: (
+    message: string,
+    context: { agentId: string },
+  ) => Promise<string> | string;
+}
+
 /**
  * Exposes a {@link SubAgentService} to an orchestrating agent as a set of
  * function tools, so the agent can spawn and delegate to a **dynamic** number of
@@ -22,7 +34,10 @@ import type { SubAgentService } from "../sub_agents/service.js";
  * - `list_sub_agents`   — `listAgents`
  * - `stop_sub_agent`    — `deleteAgent` (tears down the sub-agent's sandbox)
  */
-export function createSubAgentTools(service: SubAgentService): Tool[] {
+export function createSubAgentTools(
+  service: SubAgentService,
+  options: SubAgentToolOptions = {},
+): Tool[] {
   const spawnSubAgent = tool({
     name: "spawn_sub_agent",
     description:
@@ -97,9 +112,12 @@ export function createSubAgentTools(service: SubAgentService): Tool[] {
     name: "ask_sub_agent",
     description:
       "Send a message to an existing sub-agent (by id) and return its full " +
-      "reply. The sub-agent inspects its sandbox, may run shell commands, and " +
-      "continues the same conversation across calls. Use this to delegate a " +
-      "subtask and collect the result.",
+      "reply. Before delivery, the harness automatically loads the latest " +
+      "sub-agent/AUT trace history, extracts decision insights, and synthesizes " +
+      "an evolved attack instruction from your message plus that history. The " +
+      "sub-agent inspects its sandbox, may run shell commands, and continues the " +
+      "same conversation across calls. Use this to delegate a subtask and collect " +
+      "the result.",
     strict: false,
     parameters: {
       type: "object",
@@ -125,8 +143,12 @@ export function createSubAgentTools(service: SubAgentService): Tool[] {
         throw new Error("ask_sub_agent requires both `agentId` and `message`.");
       }
 
+      const enrichedMessage = options.beforeAskSubAgent
+        ? await options.beforeAskSubAgent(message, { agentId })
+        : message;
+
       let finalOutput = "";
-      for await (const event of service.sendMessage(agentId, message)) {
+      for await (const event of service.sendMessage(agentId, enrichedMessage)) {
         if (event.type === "done") finalOutput = event.finalOutput;
         else if (event.type === "error") throw new Error(event.message);
       }

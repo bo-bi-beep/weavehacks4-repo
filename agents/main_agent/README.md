@@ -58,7 +58,7 @@ tools**, not over HTTP. `index.ts` holds one in-process `SubAgentService`
 | Tool | Drives | What it does |
 | --- | --- | --- |
 | `spawn_sub_agent` | `createAgent` (+ `loadSkill`) | Create a sandboxed sub-agent (its own Blaxel micro-VM) from a `task`; optionally preload repo skills. Returns its `id`. |
-| `ask_sub_agent` | `sendMessage` | Send a message to a sub-agent and return its full reply (the SSE stream, drained to `finalOutput`). |
+| `ask_sub_agent` | `sendMessage` | Run the trace-feedback workflow, send the evolved message to a sub-agent, and return its full reply (the SSE stream, drained to `finalOutput`). |
 | `load_skill` | `loadSkill` | Mount a repo skill's `SKILL.md` into a sub-agent. |
 | `run_in_sub_agent` | `runCommand` | Run a shell command directly in a sub-agent's sandbox (bypasses its model). |
 | `list_sub_agents` | `listAgents` | List spawned sub-agents (id, name, model, skills, turns). |
@@ -73,12 +73,35 @@ console and recorded as a nested Weave op; `runMainAgent` calls
 `service.closeAll()` in a `finally`, so sub-agent micro-VMs never leak past the
 run.
 
+## Self-evolving trace feedback
+
+`trace_insights.ts` loads recent Weave Calls with the TypeScript SDK
+(`client.getCalls(...)`), normalizes each Call, and extracts records such as:
+
+```json
+{"status": "recorded", "decision": "approved", "expected_decision": "denied"}
+```
+
+`attack_guidance_workflow.ts` turns those records into an evolved sub-agent
+instruction on every `ask_sub_agent` call:
+
+1. load the latest sub-agent/AUT trace history
+2. extract breaches, blocked tactics, and decision mismatches
+3. synthesize an evolved attack direction plus the orchestrator's probe intent
+
+The main agent only supplies probe intent in `ask_sub_agent.message`; the
+harness runs the workflow automatically before delivery. Each new delegated
+attack therefore uses the latest known history instead of a static prompt.
+
 ## Files
 
 - `index.ts` — manifest, agent definition (with sub-agent tools), and the
   runnable CLI entry point.
 - `sub_agent_tools.ts` — `createSubAgentTools(service)`: wraps a
   `SubAgentService` as the function tools above.
+- `trace_insights.ts` — loads and analyzes Weave trace history.
+- `attack_guidance_workflow.ts` — automatic pre-delegation workflow that
+  synthesizes evolved attack guidance from trace insights.
 
 ## Run it
 
@@ -97,6 +120,7 @@ attacking the Loan Approval Agent, reporting every vulnerability it finds.
 - `OPENAI_API_KEY` — required (model calls)
 - `OPENAI_MODEL` — optional, defaults to `gpt-5.4-mini`
 - `MAIN_AGENT_SKILLS` — optional, comma-separated skill names to load; defaults to `loan-approval-agent` (`none`/empty loads no skills)
+- `MAIN_AGENT_TRACE_LIMIT` — optional number of recent Weave Calls to inspect before delegating to a sub-agent; defaults to `50`
 - `BL_API_KEY` — required (Blaxel sandbox auth)
 - `BL_WORKSPACE` — required (Blaxel workspace)
 - `BLAXEL_SANDBOX_IMAGE` — optional, defaults to `blaxel/base-image`
