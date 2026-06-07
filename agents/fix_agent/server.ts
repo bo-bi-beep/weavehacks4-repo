@@ -6,25 +6,31 @@ import { pathToFileURL } from "node:url";
 import { getWeaveProjectName, initWeave, isWeaveEnabled } from "./lib/weave.js";
 import {
   DEFAULT_REPOSITORY,
-  getFixAgentStatus,
+  applyFixProposal,
   runFixAgent,
+  type ApplyFixOptions,
   type FixAgentTraces,
-  type RunFixAgentOptions,
+  type FixProposal,
+  type ProposeFixOptions,
 } from "./index.js";
 
 /**
  * HTTP front door for the Fix Agent.
  *
  * Endpoints:
- *   POST /fix          { traces, repository?, ref?, model?, branchName?, wait?, timeoutMs?, dryRun? }
- *                      -> { summary, prUrl, agentId, agentUrl, branchName, status, pending, tracing }
- *   GET  /agents/:id   -> latest status of a launched agent (poll for the PR url)
- *   GET  /health       -> { ok, configured, tracing }
+ *   POST /fix            { traces, model?, dryRun? }
+ *                        -> { summary, proposal, pending, tracing }
+ *                        Calls Claude to diagnose the attack and generate a fix
+ *                        proposal (analysis + complete file changes). Nothing is
+ *                        pushed to GitHub — a human must review the proposal first.
  *
- * `POST /fix` hands the attack traces to a Cursor Cloud Agent, which opens the
- * fixing PR. By default it waits (up to `timeoutMs`) for the PR url; if the
- * agent is still working when the wait elapses, it returns `pending: true`
- * along with the agent url and a poll hint — call `GET /agents/:id` to follow up.
+ *   POST /fix/apply      { proposal, repository?, ref? }
+ *                        -> { prUrl, branchName, prNumber, summary, pending, tracing }
+ *                        After a human reviews and approves the proposal, call this
+ *                        endpoint to create the branch, commit the files, and open
+ *                        the pull request on GitHub.
+ *
+ *   GET  /health         -> { ok, configured, repository, tracing }
  */
 export function createFixAgentServer() {
   return createServer((req, res) => {
@@ -39,29 +45,50 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const method = req.method ?? "GET";
   const url = new URL(req.url ?? "/", "http://localhost");
 
+  // GET /health
   if (method === "GET" && url.pathname === "/health") {
     return json(res, 200, {
       ok: true,
       service: "fix-agent",
-      configured: Boolean(process.env.CURSOR_API_KEY?.trim()),
+      configured:
+        Boolean(process.env.ANTHROPIC_API_KEY?.trim()) &&
+        Boolean(process.env.GITHUB_TOKEN?.trim()),
       repository: DEFAULT_REPOSITORY,
       tracing: isWeaveEnabled(),
     });
   }
 
-  // GET /agents/:id — poll a launched agent.
-  const agentMatch = /^\/agents\/([^/]+)$/.exec(url.pathname);
-  if (agentMatch) {
-    if (method !== "GET") return json(res, 405, { error: "Method not allowed" });
-    const id = decodeURIComponent(agentMatch[1]!);
-    return json(res, 200, await getFixAgentStatus(id));
+  // POST /fix/apply — human-approved: create branch, commit, open PR
+  if (url.pathname === "/fix/apply") {
+    if (method !== "POST") return json(res, 405, { error: "Method not allowed" });
+
+    const body = (await readJson(req)) as Record<string, unknown>;
+    const proposal = body.proposal as FixProposal | undefined;
+
+    if (!isValidProposal(proposal)) {
+      return json(res, 400, {
+        error:
+          "Request body must include `proposal` (the object returned by POST /fix). " +
+          "Required fields: branch_name, pr_title, pr_body, changes[].",
+      });
+    }
+
+    const options: ApplyFixOptions = {
+      repository: asString(body.repository),
+      ref: asString(body.ref),
+    };
+
+    const result = await applyFixProposal(proposal, options);
+    return json(res, 200, result);
   }
 
+  // POST /fix — Claude analysis + proposal (no GitHub changes)
   if (url.pathname === "/fix") {
     if (method !== "POST") return json(res, 405, { error: "Method not allowed" });
 
     const body = (await readJson(req)) as Record<string, unknown>;
     const traces = body.traces as FixAgentTraces | undefined;
+
     if (!hasTraces(traces)) {
       return json(res, 400, {
         error:
@@ -70,26 +97,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       });
     }
 
-    const options: RunFixAgentOptions = {
-      repository: asString(body.repository),
-      ref: asString(body.ref),
+    const options: ProposeFixOptions = {
       model: asString(body.model),
-      branchName: asString(body.branchName),
-      wait: typeof body.wait === "boolean" ? body.wait : undefined,
-      timeoutMs: asNumber(body.timeoutMs),
       dryRun: body.dryRun === true,
     };
 
-    // Cancel the wait if the client hangs up — the agent keeps running remotely.
-    const controller = new AbortController();
-    req.on("close", () => controller.abort());
-    options.signal = controller.signal;
-
     const result = await runFixAgent(traces, options);
-    if (controller.signal.aborted && !res.writableEnded) {
-      res.end();
-      return;
-    }
     return json(res, 200, result);
   }
 
@@ -102,12 +115,20 @@ function hasTraces(traces: unknown): traces is FixAgentTraces {
   return typeof traces === "object" && traces !== null;
 }
 
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+function isValidProposal(proposal: unknown): proposal is FixProposal {
+  if (typeof proposal !== "object" || proposal === null) return false;
+  const p = proposal as Record<string, unknown>;
+  return (
+    typeof p.branch_name === "string" &&
+    typeof p.pr_title === "string" &&
+    typeof p.pr_body === "string" &&
+    Array.isArray(p.changes) &&
+    p.changes.length > 0
+  );
 }
 
-function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -156,14 +177,16 @@ async function main(): Promise<void> {
         ? `Tracing to W&B Weave project: ${getWeaveProjectName()}`
         : "Weave tracing disabled (set WANDB_API_KEY to enable).",
     );
-    if (!process.env.CURSOR_API_KEY?.trim()) {
-      console.warn("[fix-agent] CURSOR_API_KEY not set — POST /fix will fail until it is.");
-    }
+    const anthropicOk = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+    const githubOk = Boolean(process.env.GITHUB_TOKEN?.trim());
+    if (!anthropicOk) console.warn("[fix-agent] ANTHROPIC_API_KEY not set — POST /fix will fail.");
+    if (!githubOk)
+      console.warn("[fix-agent] GITHUB_TOKEN not set — POST /fix/apply will fail.");
     console.log();
     console.log("Endpoints:");
-    console.log('  POST /fix        { "traces": ... }   launch a Cloud Agent to fix the loan agent');
-    console.log("  GET  /agents/:id                     poll a launched agent for its PR url");
-    console.log("  GET  /health                         liveness probe");
+    console.log('  POST /fix          { "traces": ... }    Claude analysis + fix proposal (no GitHub)');
+    console.log('  POST /fix/apply    { "proposal": ... }  Human-approved: create branch + open PR');
+    console.log("  GET  /health                            liveness probe");
   });
 
   const shutdown = () => {

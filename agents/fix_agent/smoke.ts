@@ -2,17 +2,19 @@ import "dotenv/config";
 
 import { pathToFileURL } from "node:url";
 
-import { buildFixPrompt, runFixAgent, type AttackTrace } from "./index.js";
+import {
+  applyFixProposal,
+  buildFixPrompt,
+  runFixAgent,
+  type AttackTrace,
+} from "./index.js";
 
 /**
  * Smoke test for the Fix Agent.
  *
- *   npm run fix:smoke           # dry run: build + print the remediation prompt
- *   npm run fix:smoke -- --live # launch a real Cursor agent (needs CURSOR_API_KEY)
- *
- * The dry run touches no network and is safe to run anywhere — it verifies the
- * trace serializer and prompt builder. `--live` actually dispatches a Cloud
- * Agent (wait disabled, so it returns the agent url + branch immediately).
+ *   npm run smoke                # dry run: build + print the remediation prompt
+ *   npm run smoke -- --propose   # call Claude, print proposal (needs ANTHROPIC_API_KEY)
+ *   npm run smoke -- --apply     # propose + immediately apply / open PR (needs both keys)
  */
 
 const SAMPLE_ATTACK: AttackTrace = {
@@ -43,25 +45,47 @@ const SAMPLE_ATTACK: AttackTrace = {
 };
 
 async function main(): Promise<void> {
-  const live = process.argv.includes("--live");
+  const propose = process.argv.includes("--propose");
+  const apply = process.argv.includes("--apply");
 
-  if (!live) {
+  if (!propose && !apply) {
+    // Dry run — no network
     console.log("=== Fix Agent dry run ===\n");
     console.log("Sample attack trace:");
     console.log(JSON.stringify(SAMPLE_ATTACK, null, 2));
-    console.log("\n--- Generated remediation prompt for the Cloud Agent ---\n");
+    console.log("\n--- Generated remediation prompt ---\n");
     console.log(buildFixPrompt(SAMPLE_ATTACK));
-    console.log("\n(dry run — pass --live with CURSOR_API_KEY set to launch a real agent)");
+    console.log(
+      "\n(dry run — pass --propose to call Claude, --apply to also open a GitHub PR)",
+    );
     return;
   }
 
-  console.log("=== Fix Agent live run ===");
-  console.log("Launching a Cursor Cloud Agent (wait disabled — returns immediately)...\n");
-  const result = await runFixAgent(SAMPLE_ATTACK, { wait: false });
-  console.log(JSON.stringify(result, null, 2));
-  if (result.agentId) {
-    console.log(`\nFollow up with: GET /agents/${result.agentId}  (or re-poll via getFixAgentStatus)`);
+  // Step 1: call Claude
+  console.log("=== Fix Agent — Step 1: propose ===");
+  console.log("Calling Claude to diagnose the attack and generate a fix proposal...\n");
+
+  const result = await runFixAgent(SAMPLE_ATTACK);
+  console.log("Summary:", result.summary);
+  console.log("\nProposal:");
+  const { changes, ...meta } = result.proposal!;
+  console.log(JSON.stringify(meta, null, 2));
+  console.log(`\nFiles to be changed: ${changes.map((c) => c.path).join(", ")}`);
+
+  if (!apply) {
+    console.log(
+      "\n(proposal only — pass --apply to create the branch and open the GitHub PR)",
+    );
+    return;
   }
+
+  // Step 2: apply (simulates human approval in smoke test)
+  console.log("\n=== Fix Agent — Step 2: apply (human-approved) ===");
+  console.log("Creating branch, committing files, opening PR...\n");
+
+  const pr = await applyFixProposal(result.proposal!);
+  console.log(JSON.stringify(pr, null, 2));
+  console.log(`\nPull request opened: ${pr.prUrl}`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
