@@ -64,6 +64,7 @@ console.log(
           cacheId: cacheConfig.langCache.cacheId ? "set" : "missing",
           apiKey: cacheConfig.langCache.apiKey ? "set" : "missing",
           similarityThreshold: cacheConfig.langCache.similarityThreshold,
+          searchStrategies: cacheConfig.langCache.searchStrategies,
           useAttributes: cacheConfig.langCache.useAttributes,
           fallbackToLocal: cacheConfig.langCache.fallbackToLocal,
           timeoutMs: cacheConfig.langCache.timeoutMs,

@@ -36,6 +36,9 @@ const CONTEXT_KEY_PREFIX_BY_TYPE: Partial<Record<AttackKbStorageObjectType, stri
   system_attack_pattern: "system_pattern",
   vulnerability: "vulnerability",
   attack_pattern: "attack_pattern",
+  payload_template: "payload_template",
+  delivery_mode: "delivery_mode",
+  success_signal: "success_signal",
   evidence_source: "evidence_source",
   source_artifact: "source_artifact",
   ingested_data_item: "ingested_data_item",
@@ -260,8 +263,44 @@ function textOf(value: unknown): string {
   return String(value);
 }
 
+function attackerGoalCategoryFor(object: AttackKbCanonicalObject, payload: Record<string, unknown>): string {
+  const explicit = asString(payload.attackerGoalCategory || payload.attacker_goal_category);
+  if (explicit) return explicit;
+
+  const haystack = `${object.id} ${object.title} ${object.description ?? ""} ${object.tags.join(" ")}`.toLowerCase();
+  if (haystack.includes("tool")) return "tool_output_poisoning";
+  if (haystack.includes("privacy") || haystack.includes("data") || haystack.includes("access")) return "cross_applicant_data";
+  if (haystack.includes("override") || haystack.includes("hierarchy") || haystack.includes("admin")) return "elevated_access";
+  return "loan_approval";
+}
+
+function evidenceSourceIdsFromRefs(sourceRefs: string[]): string[] {
+  return sourceRefs.filter((ref) => ref.startsWith("evidence-"));
+}
+
 function contextProjection(object: AttackKbCanonicalObject): Record<string, unknown> {
   const payload = asRecord(object.payload);
+  const sourceRefs = uniq(object.sourceRefs);
+  const vulnerabilityIds = uniq([
+    ...asStringArray(payload.vulnerabilityRefs),
+    ...asStringArray(payload.vulnerabilityIds),
+    ...asStringArray(payload.vulnerability_ids),
+  ]);
+  const attackPatternIds = uniq([
+    ...asStringArray(payload.attackPatternIds),
+    ...asStringArray(payload.attack_pattern_ids),
+    ...sourceRefs.filter((ref) => ref.startsWith("pattern-")),
+  ]);
+  const successSignalIds = uniq([
+    ...asStringArray(payload.successSignalIds),
+    ...asStringArray(payload.success_signal_ids),
+  ]);
+  const evidenceSourceIds = uniq([
+    ...asStringArray(payload.evidenceSourceIds),
+    ...asStringArray(payload.evidence_source_ids),
+    ...evidenceSourceIdsFromRefs(sourceRefs),
+  ]);
+  const attackerGoalCategory = attackerGoalCategoryFor(object, payload);
   const projection = {
     id: object.id,
     object_type: object.objectType,
@@ -269,20 +308,39 @@ function contextProjection(object: AttackKbCanonicalObject): Record<string, unkn
     title: object.title,
     description: object.description ?? "",
     tags: object.tags,
-    source_refs: object.sourceRefs,
+    source_refs: sourceRefs,
     updated_at: object.updatedAt,
     safety_boundary: asString(payload.safetyBoundary),
     category: asString(payload.category),
     severity: asString(payload.severity),
     phase: asString(payload.phase),
-    vulnerability_refs: asStringArray(payload.vulnerabilityRefs),
+    attacker_goal_category: attackerGoalCategory,
+    attacker_goal_categories: uniq([attackerGoalCategory, ...asStringArray(payload.attackerGoalCategories)]),
+    attacker_goal: asString(payload.attackerGoal),
+    target_outcome: asString(payload.targetOutcome),
+    required_slots: asString(payload.requiredSlots),
+    turn_pattern: asString(payload.turnPattern),
+    breach_success_indicators: asString(payload.breachSuccessIndicators),
+    breach_success_indicator: asString(payload.breachSuccessIndicator || payload.observable || object.description),
+    resistance_signal: asString(payload.resistanceSignal),
+    evidence_to_capture: asString(payload.evidenceToCapture),
+    vulnerability_refs: vulnerabilityIds,
+    vulnerability_ids: vulnerabilityIds,
+    attack_pattern_ids: attackPatternIds,
+    delivery_mode_ids: asStringArray(payload.deliveryModeIds),
+    delivery_mode_id: asString(payload.deliveryModeId),
+    success_signal_ids: successSignalIds,
+    evidence_source_ids: evidenceSourceIds,
     defensive_objective: asString(payload.defensiveObjective),
     source_type: asString(payload.sourceType),
+    publisher: asString(asRecord(payload.provenance).publisher),
     url: asString(payload.url),
     provenance: textOf(payload.provenance),
     evidence: textOf(payload.evidence),
     channel: asString(payload.channel),
+    executor: asString(payload.executor, "attacker_agent"),
     observable: asString(payload.observable),
+    template: asString(payload.template),
     payload,
   };
 
@@ -292,7 +350,7 @@ function contextProjection(object: AttackKbCanonicalObject): Record<string, unkn
   };
 }
 
-async function writeContextProjection(
+export async function writeContextProjection(
   object: AttackKbCanonicalObject,
 ): Promise<string | undefined> {
   const prefix = CONTEXT_KEY_PREFIX_BY_TYPE[object.objectType];

@@ -439,6 +439,18 @@ export type PayloadTemplate = {
   description: string;
   template: string;
   safetyBoundary: string;
+  attackerGoalCategory?: string;
+  attackerGoal?: string;
+  targetOutcome?: string;
+  channel?: DeliveryMode["channel"];
+  requiredSlots?: string;
+  turnPattern?: string;
+  breachSuccessIndicators?: string;
+  evidenceToCapture?: string;
+  attackPatternIds?: string[];
+  vulnerabilityIds?: string[];
+  deliveryModeId?: string;
+  successSignalIds?: string[];
 };
 
 export type DeliveryMode = {
@@ -554,6 +566,11 @@ export type AttackKbArtifactSelectionRef = {
   title: string;
   score?: number;
   selectedFrom: "semantic_retrieval" | "template_companion" | "linked_companion";
+  contextRetriever?: {
+    toolName?: string;
+    status: "hydrated" | "unsupported" | "unconfigured" | "error";
+    error?: string;
+  };
 };
 
 export type AttackKbArtifactSelection = {
@@ -573,4 +590,11 @@ export type AttackKbResponse = {
   kbRefs: AttackKbRef[];
   retrievedContext?: AttackKbRetrievedContext;
   artifactSelection?: AttackKbArtifactSelection;
+  recommendationBuilderCache?: {
+    provider: "disabled" | "local" | "redis" | "langcache";
+    hit: boolean;
+    exact: boolean;
+    task: string;
+    model: string;
+  };
 };

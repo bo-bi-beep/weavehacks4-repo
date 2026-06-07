@@ -60,13 +60,14 @@ try {
     },
     options: {
       mainIrisContext: { limit: 12 },
-      recommendationBuilder: { mode: "blaxel", maxRecommendations: 4 }
+      recommendationBuilder: { mode: "openai", maxRecommendations: 4 }
     }
   };
 
   const result = await postJson(`${baseUrl}/api/recommendations`, body) as {
     phase?: string;
-    artifactSelection?: { selectedRefs?: Array<{ id: string; storageType: string; selectedFrom: string; score?: number }> };
+    recommendationBuilderCache?: { provider: string; hit: boolean; exact: boolean; task: string; model: string };
+    artifactSelection?: { selectedRefs?: Array<{ id: string; storageType: string; selectedFrom: string; score?: number; contextRetriever?: { toolName?: string; status: string; error?: string } }> };
     recommendations?: Array<{
       id: string;
       attackerGoal?: string;
@@ -80,11 +81,17 @@ try {
   console.log(JSON.stringify({
     ok: true,
     phase: result.phase,
+    recommendationBuilderCache: result.recommendationBuilderCache,
+    contextRetriever: {
+      hydrated: result.artifactSelection?.selectedRefs?.filter((ref) => ref.contextRetriever?.status === "hydrated").length ?? 0,
+      errors: result.artifactSelection?.selectedRefs?.filter((ref) => ref.contextRetriever?.status === "error").map((ref) => ({ id: ref.id, error: ref.contextRetriever?.error })) ?? [],
+    },
     selectedArtifacts: result.artifactSelection?.selectedRefs?.map((ref) => ({
       id: ref.id,
       type: ref.storageType,
       selectedFrom: ref.selectedFrom,
       score: ref.score,
+      contextRetriever: ref.contextRetriever,
     })),
     recommendations: result.recommendations?.map((recommendation) => ({
       id: recommendation.id,

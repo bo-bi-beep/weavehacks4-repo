@@ -22,6 +22,7 @@ LANGCACHE_CACHE_ID=
 LANGCACHE_API_KEY=
 LANGCACHE_THRESHOLD=0.82
 ATTACK_KB_LLM_CACHE=langcache
+ATTACK_KB_LANGCACHE_SEARCH_STRATEGIES=exact # recommendation packets should use exact cache lookup
 ATTACK_KB_LANGCACHE_USE_ATTRIBUTES=false # keep false unless the service has configured attributes
 ATTACK_KB_LANGCACHE_FALLBACK=disabled # use local for demos if you want fail-open
 
@@ -69,12 +70,13 @@ LANGCACHE_CACHE_ID=<cache id>
 LANGCACHE_API_KEY=<one-time service key/API token>
 LANGCACHE_THRESHOLD=0.82
 ATTACK_KB_LLM_CACHE=langcache
+ATTACK_KB_LANGCACHE_SEARCH_STRATEGIES=exact
 ATTACK_KB_LANGCACHE_USE_ATTRIBUTES=false
 ```
 
 ### CLI/API validation
 
-Run the project smoke. It optionally flushes the cache, stores a deterministic response, then confirms the second call hits managed LangCache. If Redis Cloud says `attributes: no attributes are configured for this cache`, keep `ATTACK_KB_LANGCACHE_USE_ATTRIBUTES=false`:
+Run the project smoke. It optionally flushes the cache, stores a deterministic response, then confirms the second call hits managed LangCache. Keep `ATTACK_KB_LANGCACHE_SEARCH_STRATEGIES=exact` for recommendation packets so LangCache behaves as an exact response cache; if Redis Cloud says `attributes: no attributes are configured for this cache`, keep `ATTACK_KB_LANGCACHE_USE_ATTRIBUTES=false`:
 
 ```bash
 npm run attack-kb:langcache-smoke -- --flush
@@ -92,7 +94,7 @@ curl -s -X POST "$HOST/v1/caches/$CACHE_ID/entries/search" \
   -H "accept: application/json" \
   -H "Authorization: Bearer $API_KEY" \
   -H "content-type: application/json" \
-  -d '{"prompt":"Attack KB LangCache setup check","searchStrategies":["exact","semantic"]}'
+  -d '{"prompt":"Attack KB LangCache setup check","searchStrategies":["exact"]}'
 
 curl -s -X POST "$HOST/v1/caches/$CACHE_ID/entries" \
   -H "accept: application/json" \
@@ -154,13 +156,14 @@ Redis Cloud Console:
 
 1. Open **Context Retriever** / **Context Surfaces** from Context Engine / AI services.
 2. Create a service for the Attack KB Redis database.
-3. Define a context surface/model over Attack KB entities, for example:
-   - canonical KB object
-   - vulnerability
-   - attack pattern
-   - evidence source
-   - source artifact
-   - curation candidate/review
+3. Define a context surface/model over route-composition Attack KB entities:
+   - `EvidenceSource`
+   - `DeliveryMode`
+   - `SuccessSignal`
+   - `Vulnerability`
+   - `AttackPattern`
+   - `AttackRouteTemplate` backed by `payload_template:{id}` projection keys
+   - optional `SystemPattern`
 4. Create or deploy the surface.
 5. Copy:
    - admin key
@@ -177,6 +180,22 @@ CTX_REDIS_INSTANCE_ID=<Redis database/instance id if required>
 ```
 
 The Redis Iris demo project uses the `context_surfaces` Python SDK and a setup script to create a surface. The important runtime key for agents is `MCP_AGENT_KEY`; it lets the app list/call generated Context Retriever tools without exposing raw Redis credentials.
+
+After creating or changing the surface schema, project canonical Attack KB objects into the flat Redis keys expected by Context Retriever:
+
+```bash
+npm run attack-kb:context-sync
+```
+
+When official public sources such as NIST/CFPB/Fannie Mae block sandbox retrieval, use the trusted local retrieval-only bridge. It fetches only allowlisted public official domains, extracts sanitized excerpts/provenance locally, passes those packets to sandbox triage/curation, then lets the trusted local orchestrator write approved derived artifacts:
+
+```bash
+npm run attack-kb:source-prefetch -- --max-sources=7 --target-artifacts=40
+```
+
+This bridge does not give sandbox agents secrets, Redis credentials, or Agent Under Test access.
+
+Recommendation serving uses the generated tools opportunistically when `ATTACK_KB_CONTEXT_RETRIEVER=auto`. Unsupported canonical-only artifacts remain in normal Redis/vector retrieval but are not hydrated through Context Retriever.
 
 ## Troubleshooting
 
